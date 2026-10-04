@@ -203,3 +203,17 @@ export function dailyMission(date: string): MissionDef {
     realWorldKey: REAL_WORLD_KEYS[template],
   };
 }
+
+/** The longest run of consecutive completed days, ever. */
+export function bestStreak(completedDates: readonly string[]): number {
+  const sorted = [...new Set(completedDates)].sort();
+  let best = 0;
+  let run = 0;
+  let prev: string | null = null;
+  for (const d of sorted) {
+    run = prev !== null && shiftDate(prev, 1) === d ? run + 1 : 1;
+    best = Math.max(best, run);
+    prev = d;
+  }
+  return best;
+}

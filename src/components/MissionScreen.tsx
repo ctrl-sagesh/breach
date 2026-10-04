@@ -20,6 +20,8 @@ interface MissionScreenProps {
   onRetry: () => void;
   onAbort: () => void;
   onCommand?: (raw: string) => void;
+  /** Called once when the attempt fails, by trace or by the clock. */
+  onFailed?: (session: GameSession) => void;
 }
 
 type Phase = 'playing' | 'tearing' | 'traced';
@@ -28,7 +30,7 @@ type Flash = { kind: 'granted' | 'denied'; id: number } | null;
 const ALARM_TRACE = 75;
 const COUNTDOWN_WARN = 120;
 
-export default function MissionScreen({ mission, session, attemptKey, speed, reduceMotion, onWon, onRetry, onAbort, onCommand }: MissionScreenProps) {
+export default function MissionScreen({ mission, session, attemptKey, speed, reduceMotion, onWon, onRetry, onAbort, onCommand, onFailed }: MissionScreenProps) {
   const [, setTick] = useState(0);
   const [phase, setPhase] = useState<Phase>('playing');
   const [flash, setFlash] = useState<Flash>(null);
@@ -46,6 +48,13 @@ export default function MissionScreen({ mission, session, attemptKey, speed, red
   useEffect(() => {
     setTension(session.trace);
   }, [session.trace]);
+
+  // Report a failed attempt once, so the ops log can record it.
+  useEffect(() => {
+    if (phase === 'tearing') onFailed?.(session);
+    // onFailed is read at the moment the attempt fails; it is not a trigger of its own.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase]);
 
   // A failed attempt tears the screen, then cuts to the TRACED card. Reduced motion skips the tear.
   useEffect(() => {

@@ -5,3 +5,5 @@ export { validateRun, RUN_LIMITS } from '../../../src/engine/replay';
 export { MISSIONS } from '../../../src/missions';
 export { dailyMission, shiftDate, utcDate } from '../../../src/lib/daily';
 export { nicknameProblem } from '../../../src/lib/nickname';
+export { admit, generateRecoveryKey, isWellFormedKey, normalizeRecoveryKey, RESTORE_LIMIT } from '../../../src/lib/recoverykey';
+export { mergeSaves } from '../../../src/lib/merge';

@@ -3342,11 +3342,170 @@ function nicknameProblem(nick) {
   if (containsProfanity(nick)) return "That nickname is not allowed.";
   return null;
 }
+
+// src/lib/recoverykey.ts
+var KEY_WORDS = [
+  "AMBER",
+  "ANCHOR",
+  "ARROW",
+  "ASH",
+  "BASALT",
+  "BEACON",
+  "BISHOP",
+  "BLAZE",
+  "BRASS",
+  "CANYON",
+  "CEDAR",
+  "CIPHER",
+  "CLOUD",
+  "COBALT",
+  "COMET",
+  "COPPER",
+  "CORVID",
+  "CRATER",
+  "DELTA",
+  "DRIFT",
+  "EMBER",
+  "ENIGMA",
+  "FALCON",
+  "FERN",
+  "FJORD",
+  "FLINT",
+  "FORGE",
+  "FROST",
+  "GHOST",
+  "GLACIER",
+  "GLASS",
+  "GRANITE",
+  "HARBOR",
+  "HAZEL",
+  "HELIX",
+  "HOLLOW",
+  "INDIGO",
+  "IRON",
+  "JADE",
+  "JUNIPER",
+  "KESTREL",
+  "LANTERN",
+  "LATCH",
+  "LOTUS",
+  "MERIDIAN",
+  "MERCURY",
+  "MIRROR",
+  "MOSS",
+  "NEEDLE",
+  "NEON",
+  "ONYX",
+  "ORBIT",
+  "OSPREY",
+  "PARADOX",
+  "PINE",
+  "PRISM",
+  "QUARTZ",
+  "RAVEN",
+  "RIVER",
+  "SABLE",
+  "SIGNAL",
+  "SILVER",
+  "SLATE",
+  "STATIC",
+  "SUMMIT",
+  "TIDE",
+  "TUNDRA",
+  "VAULT",
+  "VELVET",
+  "WILLOW"
+];
+var KEY_PATTERN = /^[A-Z]+-[A-Z]+-[A-Z]+-[A-Z]+-\d{4}$/;
+function generateRecoveryKey(random) {
+  const pick2 = () => KEY_WORDS[Math.floor(random() * KEY_WORDS.length)];
+  const digits = String(Math.floor(random() * 1e4)).padStart(4, "0");
+  return [pick2(), pick2(), pick2(), pick2(), digits].join("-");
+}
+function normalizeRecoveryKey(input) {
+  return input.trim().toUpperCase().replace(/[\s_]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
+}
+function isWellFormedKey(input) {
+  return KEY_PATTERN.test(normalizeRecoveryKey(input));
+}
+function admit(bucket, now, opts) {
+  const fresh = !bucket || now - bucket.windowStart >= opts.windowMs;
+  const base = fresh ? { windowStart: now, hits: 0 } : bucket;
+  const next = { windowStart: base.windowStart, hits: base.hits + 1 };
+  return { allowed: next.hits <= opts.max, next };
+}
+var RESTORE_LIMIT = { windowMs: 60 * 60 * 1e3, max: 10 };
+
+// src/lib/history.ts
+var HISTORY_LIMIT = 200;
+function mergeHistory(a, b) {
+  const byId = /* @__PURE__ */ new Map();
+  for (const r of [...a, ...b]) byId.set(r.id, r);
+  return [...byId.values()].sort((x, y) => x.at < y.at ? 1 : x.at > y.at ? -1 : 0).slice(0, HISTORY_LIMIT);
+}
+
+// src/lib/merge.ts
+var TIERS2 = ["easy", "medium", "hard"];
+function betterResult(a, b) {
+  if (!a) return b;
+  if (!b) return a;
+  return b.points > a.points ? b : a;
+}
+function mergeCompleted(a, b) {
+  const out = { easy: {}, medium: {}, hard: {} };
+  for (const t of TIERS2) {
+    const ids = /* @__PURE__ */ new Set([...Object.keys(a[t]), ...Object.keys(b[t])]);
+    for (const id of ids) {
+      const best = betterResult(a[t][id], b[t][id]);
+      if (best) out[t][id] = best;
+    }
+  }
+  return out;
+}
+function mergeAttempts(a, b) {
+  const out = { easy: {}, medium: {}, hard: {} };
+  for (const t of TIERS2) {
+    for (const id of /* @__PURE__ */ new Set([...Object.keys(a[t]), ...Object.keys(b[t])])) {
+      out[t][id] = Math.max(a[t][id] ?? 0, b[t][id] ?? 0);
+    }
+  }
+  return out;
+}
+function mergeDailies(a, b) {
+  const out = {};
+  for (const date of /* @__PURE__ */ new Set([...Object.keys(a), ...Object.keys(b)])) {
+    const row = {};
+    for (const t of TIERS2) {
+      const best = betterResult(a[date]?.[t], b[date]?.[t]);
+      if (best) row[t] = best;
+    }
+    out[date] = row;
+  }
+  return out;
+}
+function mergeSaves(local, remote) {
+  return {
+    ...local,
+    completed: mergeCompleted(local.completed, remote.completed),
+    attempts: mergeAttempts(local.attempts, remote.attempts),
+    achievements: [.../* @__PURE__ */ new Set([...local.achievements, ...remote.achievements])],
+    history: mergeHistory(local.history, remote.history).slice(0, HISTORY_LIMIT),
+    dailies: mergeDailies(local.dailies, remote.dailies),
+    counters: { sudoTries: Math.max(local.counters.sudoTries, remote.counters.sudoTries) },
+    nickname: local.nickname ?? remote.nickname
+  };
+}
 export {
   MISSIONS,
+  RESTORE_LIMIT,
   RUN_LIMITS,
+  admit,
   dailyMission,
+  generateRecoveryKey,
+  isWellFormedKey,
+  mergeSaves,
   nicknameProblem,
+  normalizeRecoveryKey,
   shiftDate,
   utcDate,
   validateRun

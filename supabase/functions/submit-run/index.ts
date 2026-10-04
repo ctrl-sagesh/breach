@@ -125,6 +125,8 @@ Deno.serve(async (req) => {
     seconds: result.seconds,
     trace: result.trace,
     hints: result.hints,
+    // The checked command log, so the best run for a job can be watched. Only the typed text and timing are kept.
+    commands: body.run.commands.map((c) => ({ t: c.t, cmd: c.cmd })),
   };
   const write = mine.length
     ? await rest(`runs?id=eq.${mine[0].id}`, { method: 'PATCH', body: JSON.stringify(row) })

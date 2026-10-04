@@ -6,7 +6,7 @@ import { pointsFor } from './difficulty';
 import { scoreMission } from './scoring';
 import { GameSession, Out } from './session';
 import { TIERS } from './difficulty';
-import type { MissionDef, Tier } from './types';
+import type { Line, MissionDef, Tier } from './types';
 
 /** Logged in place of a command when the player presses Ctrl+C at a password or question prompt. */
 export const CANCEL_MARK = '\u0003';
@@ -87,4 +87,31 @@ export function validateRun(run: RunLog, missions: readonly MissionDef[]): Repla
     usedAliases: session.usedAliases,
     usedPipe: session.usedPipe,
   };
+}
+
+export interface TimelineStep {
+  /** When the command was typed, in ms from the start of the attempt. */
+  t: number;
+  /** The command as typed (or the cancel marker). */
+  cmd: string;
+  /** Every line the engine printed for it, the echo line first. */
+  lines: Line[];
+}
+
+/**
+ * Re-runs a logged attempt through the engine and keeps what each command printed. The viewer plays this back.
+ * Because the engine is deterministic, the output matches the original attempt line for line.
+ */
+export function replayTimeline(mission: MissionDef, tier: Tier, commands: readonly RunCommand[]): TimelineStep[] {
+  let clock = 0;
+  const session = new GameSession(mission, { tier, now: () => clock });
+  return commands.map((c) => {
+    clock = c.t;
+    if (c.cmd === CANCEL_MARK) {
+      const out = new Out();
+      session.cancelPending(out);
+      return { t: c.t, cmd: c.cmd, lines: out.lines };
+    }
+    return { t: c.t, cmd: c.cmd, lines: session.input(c.cmd).lines };
+  });
 }

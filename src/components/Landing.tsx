@@ -10,6 +10,8 @@ import { landingReply, TAGLINE } from '../lib/landing';
 import { dailyNumber, msUntilReset, utcDate } from '../lib/daily';
 import Decrypt from './Decrypt';
 import Icon from './Icon';
+import RestoreInline from './RestoreInline';
+import type { RestoreResult } from '../lib/cloud';
 import WorldBackdrop from './WorldBackdrop';
 
 interface LandingProps {
@@ -19,6 +21,9 @@ interface LandingProps {
   onContinue: () => void;
   onDaily: () => void;
   dailyStreak: number;
+  muted: boolean;
+  onToggleMute: () => void;
+  onRestored: (restored: RestoreResult) => void;
   /** Fires once, on the first click or key. Browsers only allow audio after a gesture. */
   onFirstGesture: () => void;
 }
@@ -34,7 +39,7 @@ function countdownText(ms: number): string {
   return [Math.floor(total / 3600), Math.floor((total % 3600) / 60), total % 60].map((n) => String(n).padStart(2, '0')).join(':');
 }
 
-export default function Landing({ tier, hasSave, onStart, onContinue, onDaily, dailyStreak, onFirstGesture }: LandingProps) {
+export default function Landing({ tier, hasSave, onStart, onContinue, onDaily, dailyStreak, muted, onToggleMute, onRestored, onFirstGesture }: LandingProps) {
   const [typed, setTyped] = useState(0);
   const [untilReset, setUntilReset] = useState(msUntilReset());
   useEffect(() => {
@@ -104,6 +109,16 @@ export default function Landing({ tier, hasSave, onStart, onContinue, onDaily, d
       <WorldBackdrop />
       <div className="landing-vignette pointer-events-none fixed inset-0" aria-hidden="true" />
 
+      <button
+        type="button"
+        onClick={onToggleMute}
+        className="fixed right-3 top-3 z-20 flex items-center gap-2 border border-[var(--edge)] bg-[var(--panel)] px-2 py-1 text-[10px] tracking-widest text-[var(--dim)] hover:text-[var(--fg)]"
+        aria-pressed={muted}
+      >
+        <Icon name={muted ? 'sound-off' : 'sound-on'} size={14} />
+        {muted ? 'SOUND OFF' : 'SOUND ON'}
+      </button>
+
       <div className="relative z-10 w-full max-w-2xl" data-keep-clear>
         <h1 className="glow mb-1 text-center text-3xl font-bold tracking-[0.35em] sm:text-4xl">
           <Decrypt text="BREACH" />
@@ -163,6 +178,10 @@ export default function Landing({ tier, hasSave, onStart, onContinue, onDaily, d
               Continue jobs
             </button>
           ) : null}
+        </div>
+
+        <div className="mb-6 flex justify-center">
+          <RestoreInline onRestored={onRestored} />
         </div>
 
         <section className="mb-6" aria-label="difficulty tiers">

@@ -6,12 +6,16 @@ import type { MotionSetting, SaveData, TypingSpeed } from '../lib/save';
 import { clearedOnAnyTier } from '../lib/progress';
 import Icon from './Icon';
 import { Header, Screen } from './ui';
+import AccountPanel from './AccountPanel';
+import { TRACKS, TRACK_LABELS } from '../lib/music';
+import type { RestoreResult } from '../lib/cloud';
 
 interface SettingsProps {
   save: SaveData;
   onChange: (patch: Partial<SaveData>) => void;
   onReset: () => void;
   onBack: () => void;
+  onRestored: (restored: RestoreResult) => void;
 }
 
 const SPEEDS: { id: TypingSpeed; label: string }[] = [
@@ -26,7 +30,7 @@ const MOTION: { id: MotionSetting; label: string }[] = [
   { id: 'reduce', label: 'Reduced' },
 ];
 
-export default function Settings({ save, onChange, onReset, onBack }: SettingsProps) {
+export default function Settings({ save, onChange, onReset, onBack, onRestored }: SettingsProps) {
   const [confirmReset, setConfirmReset] = useState(false);
   const cleared = clearedOnAnyTier(save);
 
@@ -120,6 +124,40 @@ export default function Settings({ save, onChange, onReset, onBack }: SettingsPr
         </div>
         <p className="mt-2 text-xs text-[var(--dim)]">Tap or press Esc on the terminal to finish a line instantly.</p>
       </section>
+
+      <section className="mb-8" aria-label="soundtrack">
+        <h2 className="mb-3 flex items-center gap-2 text-sm tracking-widest text-[var(--dim)]">
+          <Icon name="sound-on" size={16} />
+          SOUNDTRACK
+        </h2>
+        <div className="mb-4 grid gap-2 sm:grid-cols-3" role="radiogroup" aria-label="soundtrack">
+          {TRACKS.map((t) => (
+            <button key={t} type="button" role="radio" aria-checked={save.track === t} className="btn text-xs sm:text-sm" onClick={() => onChange({ track: t })}>
+              {save.track === t ? '● ' : '○ '}
+              {TRACK_LABELS[t]}
+            </button>
+          ))}
+        </div>
+        <label className="block text-sm">
+          <span className="mb-2 flex justify-between">
+            <span>Music volume</span>
+            <span className="tabular-nums">{Math.round(save.musicVolume * 100)}%</span>
+          </span>
+          <input
+            type="range"
+            min={0}
+            max={100}
+            step={5}
+            value={Math.round(save.musicVolume * 100)}
+            onChange={(e) => onChange({ musicVolume: Number(e.target.value) / 100 })}
+            className="w-full accent-[var(--fg)]"
+            aria-label="music volume"
+          />
+        </label>
+        <p className="mt-2 text-xs text-[var(--dim)]">Separate from effects. The soundtrack gets quieter than the effects at any setting.</p>
+      </section>
+
+      <AccountPanel save={save} onChange={onChange} onRestored={onRestored} />
 
       <section className="mt-auto space-y-3 pt-8">
         <button

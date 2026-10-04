@@ -131,8 +131,18 @@ export async function fetchMissionBoard(missionId: string, tier: Tier, slot: str
   return rows.map((r) => ({ nickname: r.players?.nickname ?? '???', score: r.score, seconds: r.seconds, trace: r.trace, hints: r.hints }));
 }
 
-/** Your place on the campaign board for a tier. With no entries yet, this is the place you would take. */
+/**
+ * Your place on the campaign board for a tier. Null unless you have a submitted campaign score on that tier,
+ * so a board with nobody on it never shows a place.
+ */
 export async function fetchMyRank(playerId: string, tier: Tier): Promise<number | null> {
+  const mine = await withTimeout(`${SUPABASE_URL}/rest/v1/campaign_totals?player_id=eq.${playerId}&tier=eq.${tier}&select=points`, {
+    headers: headers(),
+  });
+  if (!mine.ok) throw new Error(`totals ${mine.status}`);
+  const rows = (await mine.json()) as { points: number }[];
+  if (rows.length === 0) return null;
+
   const res = await withTimeout(`${SUPABASE_URL}/rest/v1/rpc/player_rank`, {
     method: 'POST',
     headers: headers(),
@@ -141,4 +151,23 @@ export async function fetchMyRank(playerId: string, tier: Tier): Promise<number 
   if (!res.ok) throw new Error(`rank ${res.status}`);
   const rank = (await res.json()) as number;
   return typeof rank === 'number' ? rank : null;
+}
+
+export interface TopRun {
+  nickname: string;
+  score: number;
+  commands: RunCommand[];
+}
+
+/** The best campaign run on the board for one job and tier, with its command log. Null when nobody has one yet. */
+export async function fetchTopRun(missionId: string, tier: Tier): Promise<TopRun | null> {
+  const res = await withTimeout(
+    `${SUPABASE_URL}/rest/v1/runs?select=score,commands,players(nickname)&mission_id=eq.${encodeURIComponent(missionId)}&tier=eq.${tier}&slot=eq.campaign&commands=not.is.null&order=score.desc&limit=1`,
+    { headers: headers() },
+  );
+  if (!res.ok) throw new Error(`top run ${res.status}`);
+  const rows = (await res.json()) as { score: number; commands: RunCommand[]; players: { nickname: string } | null }[];
+  const top = rows[0];
+  if (!top) return null;
+  return { nickname: top.players?.nickname ?? '???', score: top.score, commands: top.commands };
 }

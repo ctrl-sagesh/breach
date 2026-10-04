@@ -1,25 +1,27 @@
 'use client';
 
-// Top-level screen router. Owns the save data, the current attempt, the run log that feeds the leaderboard,
-// achievements, and transitions between screens.
+// Top-level screen router. Owns the save data, the current attempt, the run log that feeds the leaderboard and the ops
+// log, achievements, cloud sync, and transitions between screens.
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { GameSession } from '../engine/session';
 import { rankForScore, scoreMission, type MissionResult } from '../engine/scoring';
 import { DIFFICULTY, pointsFor } from '../engine/difficulty';
 import type { MissionDef, Tier } from '../engine/types';
 import type { RunCommand } from '../engine/replay';
 import { MISSIONS } from '../missions';
-import { setAudioSettings, setTension, startMusic } from '../lib/audio';
+import { setAudioSettings, setMusicTrack, setTension, startMusic } from '../lib/audio';
 import { DEFAULT_SAVE, effectiveReduceMotion, loadSave, persistSave, type SaveData } from '../lib/save';
 import { campaignDone, factsFromWin, newlyUnlocked, type AchievementDef } from '../lib/achievements';
 import { dailyMission, dailyNumber, streakFor, utcDate } from '../lib/daily';
 import { realWorldFor } from '../lib/realworld';
 import { buildSubmission, getPlayerId, type Submission } from '../lib/leaderboard';
+import { debounce, syncSave, type RestoreResult } from '../lib/cloud';
+import { addAttempt, type AttemptRecord, type Outcome } from '../lib/history';
+import { mergeSaves } from '../lib/merge';
 import { summarize } from '../lib/progress';
 import type { ShareFacts } from '../lib/share';
-import { AchievementToast } from './Achievements';
-import AchievementsScreen from './Achievements';
+import Achievements, { AchievementToast } from './Achievements';
 import Boot from './Boot';
 import BoardScreen from './BoardScreen';
 import Briefing from './Briefing';
@@ -30,12 +32,16 @@ import Landing from './Landing';
 import MainMenu from './MainMenu';
 import MissionScreen from './MissionScreen';
 import MissionSelect from './MissionSelect';
+import OpsLog from './OpsLog';
+import Profile from './Profile';
+import Register from './Register';
 import Settings from './Settings';
 import Transfer from './Transfer';
 
 type Screen =
   | { name: 'boot' }
   | { name: 'landing' }
+  | { name: 'register' }
   | { name: 'menu' }
   | { name: 'select' }
   | { name: 'settings' }
@@ -43,6 +49,8 @@ type Screen =
   | { name: 'daily' }
   | { name: 'board' }
   | { name: 'achievements' }
+  | { name: 'history' }
+  | { name: 'profile' }
   | { name: 'briefing'; index: number }
   /** `date` is set for the daily job, which is generated from the date rather than taken from the list. */
   | { name: 'play'; index: number; date?: string }
@@ -51,6 +59,8 @@ type Screen =
 
 /** How long the CRT switch-off takes before the job board appears. */
 const CRT_OFF_MS = 420;
+/** Sync waits this long after the last change, so several changes send one request. */
+const SYNC_DEBOUNCE_MS = 4000;
 
 /** What a finished attempt sends to the board, kept until the debrief posts it. */
 interface LastRun {
@@ -65,6 +75,10 @@ function missionFor(index: number, date?: string): MissionDef {
   return date ? dailyMission(date) : MISSIONS[index];
 }
 
+function newAttemptId(): string {
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
 export default function GameApp() {
   const [save, setSave] = useState<SaveData>(DEFAULT_SAVE);
   const [screen, setScreen] = useState<Screen>({ name: 'boot' });
@@ -75,16 +89,16 @@ export default function GameApp() {
   const [systemReduce, setSystemReduce] = useState(false);
   const [toast, setToast] = useState<AchievementDef[]>([]);
   const [lastRun, setLastRun] = useState<LastRun | null>(null);
-  const [tier, setTierState] = useState<Tier>(DEFAULT_SAVE.tier);
   const lastScreen = useRef<Screen['name']>('boot');
-  /** The attempt's command log, timed from the moment the session opened. Replayed by the server. */
-  const run = useRef<{ startedAt: number; commands: RunCommand[] }>({ startedAt: 0, commands: [] });
+  /** The attempt's command log, timed from the moment the session opened. Replayed by the server and the viewer. */
+  const run = useRef<{ startedAt: number; commands: RunCommand[]; recorded: boolean }>({ startedAt: 0, commands: [], recorded: false });
+  /** Set when a save change came from a sync merge, so the change does not send another sync. */
+  const fromSync = useRef(false);
 
   // Storage and matchMedia are read on the client only, so the static export pre-renders safely.
   useEffect(() => {
     const loaded = loadSave();
     setSave(loaded);
-    setTierState(loaded.tier);
     const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
     setSystemReduce(mq.matches);
     const onChange = () => setSystemReduce(mq.matches);
@@ -97,8 +111,8 @@ export default function GameApp() {
   }, [save.theme]);
 
   useEffect(() => {
-    setAudioSettings({ volume: save.volume, sfx: save.sfx, music: save.music });
-  }, [save.volume, save.sfx, save.music]);
+    setAudioSettings({ volume: save.volume, sfx: save.sfx, music: save.music, musicVolume: save.musicVolume, track: save.track });
+  }, [save.volume, save.sfx, save.music, save.musicVolume, save.track]);
 
   // On phones, the visual viewport shrinks when the keyboard opens. Size the app to it so the prompt stays visible.
   useEffect(() => {
@@ -139,15 +153,54 @@ export default function GameApp() {
     });
   }, []);
 
+  // Cloud sync. Local saves are the source of truth; a sync sends the local copy and takes back the merged one.
+  const syncNow = async (snapshot: SaveData) => {
+    if (!snapshot.playerId || !snapshot.syncToken) return;
+    const r = await syncSave(snapshot.playerId, snapshot.syncToken, snapshot);
+    if (!r.ok) return;
+    fromSync.current = true;
+    setSave((prev) => {
+      const merged = mergeSaves(prev, r.value.save);
+      persistSave(merged);
+      return merged;
+    });
+  };
+  const scheduleSync = useMemo(() => debounce((s: SaveData) => void syncNow(s), SYNC_DEBOUNCE_MS), []);
+
+  useEffect(() => {
+    if (fromSync.current) {
+      fromSync.current = false;
+      return;
+    }
+    if (save.syncToken) scheduleSync(save);
+    // Sync follows every save change, except the ones a sync itself made.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [save]);
+
+  useEffect(() => {
+    setMusicTrack(save.track);
+  }, [save.track]);
+
   const onBootDone = useCallback(() => setScreen({ name: 'landing' }), []);
   // Ambient music starts on the first click or key. Browsers do not allow sound before that.
   const onFirstGesture = useCallback(() => startMusic(), []);
   const toMenu = useCallback(() => setScreen({ name: 'menu' }), []);
   const toDaily = useCallback(() => setScreen({ name: 'daily' }), []);
 
-  const setTier = (next: Tier) => {
-    setTierState(next);
-    update({ tier: next });
+  const setTier = (next: Tier) => update({ tier: next });
+
+  const muted = !save.sfx && !save.music;
+  const toggleMute = () => update({ sfx: muted, music: muted });
+
+  /** A restore brings the account's identity and the cloud copy onto this device. Device settings stay. */
+  const adoptRestored = (r: RestoreResult) => {
+    fromSync.current = false;
+    setSave((prev) => {
+      const base: SaveData = { ...prev, playerId: r.playerId, nickname: r.nickname, syncToken: r.syncToken, recoveryKey: undefined, registerSkipped: false };
+      const merged = r.save ? mergeSaves(base, r.save) : base;
+      persistSave(merged);
+      return merged;
+    });
   };
 
   /** Sudo tries are a lifetime counter. Add this attempt's tries when the attempt ends. */
@@ -161,11 +214,34 @@ export default function GameApp() {
   };
 
   const openSession = (mission: MissionDef, sessionTier: Tier) => {
-    run.current = { startedAt: Date.now(), commands: [] };
+    run.current = { startedAt: Date.now(), commands: [], recorded: false };
     const s = new GameSession(mission, { tier: sessionTier });
     setSession(s);
     setAttemptKey((k) => k + 1);
     return s;
+  };
+
+  /** An attempt that ended without a win (trace, clock or abort) goes into the ops log once. */
+  const logAttempt = (s: GameSession, mission: MissionDef, date: string | undefined, outcome: Outcome) => {
+    if (run.current.recorded) return;
+    run.current.recorded = true;
+    const attemptNo = save.attempts[s.tier][mission.id] ?? 1;
+    const record: AttemptRecord = {
+      id: newAttemptId(),
+      at: new Date().toISOString(),
+      missionId: mission.id,
+      scope: date ? 'daily' : 'campaign',
+      tier: s.tier,
+      attemptNo,
+      outcome,
+      score: 0,
+      points: 0,
+      seconds: s.elapsedSeconds(),
+      trace: s.trace,
+      hints: s.hintsUsed,
+      commands: [...run.current.commands],
+    };
+    update({ history: addAttempt(save.history, record) });
   };
 
   const beginAttempt = (index: number) => {
@@ -226,7 +302,7 @@ export default function GameApp() {
     const today = utcDate(now);
     const isDaily = Boolean(date);
 
-    // Next save state, computed once so achievements read the same numbers that get saved.
+    // Next save state, computed once so achievements and the ops log read the same numbers that get saved.
     const tierResults = save.completed[s.tier];
     const best = tierResults[mission.id];
     const keep = !best || result.points >= best.points ? result : best;
@@ -240,12 +316,30 @@ export default function GameApp() {
     const facts = factsFromWin(s, { score: base, isDaily, campaignDoneOnTier, streak, sudoTotal, now });
     const unlocked = newlyUnlocked(facts, save.achievements);
 
+    const record: AttemptRecord = {
+      id: newAttemptId(),
+      at: now.toISOString(),
+      missionId: mission.id,
+      scope: isDaily ? 'daily' : 'campaign',
+      tier: s.tier,
+      attemptNo: save.attempts[s.tier][mission.id] ?? 1,
+      outcome: 'cleared',
+      score: base,
+      points: result.points,
+      seconds: s.elapsedSeconds(),
+      trace: s.trace,
+      hints: s.hintsUsed,
+      commands: [...run.current.commands],
+    };
+    run.current.recorded = true;
+
     const next: SaveData = {
       ...save,
       completed,
       dailies,
       counters: { ...save.counters, sudoTries: sudoTotal },
       achievements: [...save.achievements, ...unlocked.map((a) => a.id)],
+      history: addAttempt(save.history, record),
     };
     persistSave(next);
     setSave(next);
@@ -254,6 +348,10 @@ export default function GameApp() {
     setLastRun({ missionId: mission.id, tier: s.tier, scope: isDaily ? 'daily' : 'campaign', date, commands: [...run.current.commands] });
     setSession(null);
     setScreen({ name: 'transfer', index, result, date });
+  };
+
+  const onFailed = (index: number, s: GameSession, date?: string) => {
+    logAttempt(s, missionFor(index, date), date, s.failReason === 'time' ? 'timed-out' : 'traced');
   };
 
   const onTransferDone = useCallback(() => {
@@ -265,6 +363,7 @@ export default function GameApp() {
   const abortMission = () => {
     flushSudo(session);
     const back: Screen = screen.name === 'play' && screen.date ? { name: 'daily' } : { name: 'select' };
+    if (session && !session.finished) logAttempt(session, missionFor(screen.name === 'play' ? screen.index : -1, screen.name === 'play' ? screen.date : undefined), screen.name === 'play' ? screen.date : undefined, 'aborted');
     if (reduceMotion) {
       setSession(null);
       setScreen(back);
@@ -280,6 +379,8 @@ export default function GameApp() {
   };
 
   const resetProgress = () => {
+    // A reset is local. The device is signed out of its cloud copy, so the old progress does not sync back.
+    // The account can still be restored with its recovery key.
     const next: SaveData = {
       ...DEFAULT_SAVE,
       completed: { easy: {}, medium: {}, hard: {} },
@@ -291,10 +392,11 @@ export default function GameApp() {
       sfx: save.sfx,
       music: save.music,
       volume: save.volume,
+      musicVolume: save.musicVolume,
+      track: save.track,
       motion: save.motion,
-      // Identity stays. Progress, achievements and dailies go.
-      playerId: save.playerId,
       nickname: save.nickname,
+      registerSkipped: save.registerSkipped,
     };
     persistSave(next);
     setSave(next);
@@ -315,10 +417,26 @@ export default function GameApp() {
           tier={save.tier}
           hasSave={hasSave}
           dailyStreak={dailyStreak}
-          onStart={toMenu}
+          muted={muted}
+          onToggleMute={toggleMute}
+          onRestored={adoptRestored}
+          onStart={() => setScreen(!save.nickname && !save.registerSkipped ? { name: 'register' } : { name: 'menu' })}
           onContinue={() => setScreen({ name: 'select' })}
           onDaily={toDaily}
           onFirstGesture={onFirstGesture}
+        />
+      );
+      break;
+    case 'register':
+      body = (
+        <Register
+          save={save}
+          onRegistered={(patch) => update(patch)}
+          onDone={toMenu}
+          onSkip={() => {
+            update({ registerSkipped: true });
+            toMenu();
+          }}
         />
       );
       break;
@@ -332,6 +450,8 @@ export default function GameApp() {
             else if (target === 'daily') setScreen({ name: 'daily' });
             else if (target === 'board') setScreen({ name: 'board' });
             else if (target === 'achievements') setScreen({ name: 'achievements' });
+            else if (target === 'history') setScreen({ name: 'history' });
+            else if (target === 'profile') setScreen({ name: 'profile' });
             else setScreen({ name: 'card' });
           }}
         />
@@ -347,10 +467,16 @@ export default function GameApp() {
       body = <BoardScreen tier={save.tier} onTier={setTier} onBack={toMenu} />;
       break;
     case 'achievements':
-      body = <AchievementsScreen unlocked={save.achievements} onBack={toMenu} />;
+      body = <Achievements unlocked={save.achievements} onBack={toMenu} />;
+      break;
+    case 'history':
+      body = <OpsLog save={save} tier={save.tier} onTier={setTier} onBack={toMenu} />;
+      break;
+    case 'profile':
+      body = <Profile save={save} onBack={toMenu} />;
       break;
     case 'settings':
-      body = <Settings save={save} onChange={update} onReset={resetProgress} onBack={toMenu} />;
+      body = <Settings save={save} onChange={update} onReset={resetProgress} onBack={toMenu} onRestored={adoptRestored} />;
       break;
     case 'card':
       body = <EndScreen save={save} onMenu={toMenu} />;
@@ -387,6 +513,7 @@ export default function GameApp() {
             onRetry={() => (date ? toDaily() : beginAttempt(index))}
             onAbort={abortMission}
             onCommand={onCommand}
+            onFailed={(s) => onFailed(index, s, date)}
           />
         </div>
       );
@@ -444,7 +571,7 @@ export default function GameApp() {
   }
 
   return (
-    <div className={`relative min-h-dvh ${reduceMotion ? 'reduce-motion' : ''}`}>
+    <div className={`relative min-h-dvh overflow-x-hidden ${reduceMotion ? 'reduce-motion' : ''}`}>
       {body}
       {wipeKey > 0 && !reduceMotion ? <div key={wipeKey} className="wipe" aria-hidden="true" /> : null}
       <AchievementToast items={toast} onDismiss={() => setToast([])} />

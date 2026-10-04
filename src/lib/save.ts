@@ -6,6 +6,9 @@ import type { MissionResult } from '../engine/scoring';
 import { isTier } from '../engine/difficulty';
 import type { Tier } from '../engine/types';
 import type { ThemeId } from './themes';
+import type { AttemptRecord } from './history';
+
+export type MusicTrack = 'night-shift' | 'signal' | 'cold-room';
 
 export type TypingSpeed = 'fast' | 'normal' | 'instant';
 /** 'system' follows the OS "reduce motion" setting. */
@@ -30,6 +33,17 @@ export interface SaveData {
   counters: { sudoTries: number };
   /** Daily challenge results by UTC date, then tier. One attempt per day per tier. */
   dailies: Record<string, Partial<Record<Tier, MissionResult>>>;
+  /** Ops log: every attempt on this device, newest first. */
+  history: AttemptRecord[];
+  /** Soundtrack. */
+  track: MusicTrack;
+  /** Music level, separate from effects. 0 to 1. */
+  musicVolume: number;
+  /** Cloud sync: the recovery key shown at registration (kept on this device only) and the sync token. */
+  recoveryKey?: string;
+  syncToken?: string;
+  /** Set when the player chose to skip registration on the register screen. */
+  registerSkipped?: boolean;
   /** Anonymous id for the leaderboard. Created on first use, never tied to a name or account. */
   playerId?: string;
   /** Nickname for the leaderboard, 3 to 16 characters. */
@@ -57,6 +71,9 @@ export const DEFAULT_SAVE: SaveData = {
   achievements: [],
   counters: { sudoTries: 0 },
   dailies: {},
+  history: [],
+  track: 'night-shift',
+  musicVolume: 0.4,
 };
 
 function freshDefaults(): SaveData {

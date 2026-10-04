@@ -5,11 +5,15 @@
 
 import type { SoundEvent } from '../engine/types';
 import { MusicPlayer } from './music';
+import type { MusicTrack } from './save';
 
 export interface AudioSettings {
   volume: number; // 0 to 1
   sfx: boolean;
   music: boolean;
+  /** Music level, as a fraction of the effects level. 0.4 means 40 percent. */
+  musicVolume: number;
+  track: MusicTrack;
 }
 
 interface Graph {
@@ -21,10 +25,8 @@ interface Graph {
 
 const MASTER = 0.5; // global headroom
 const SFX_LEVEL = 0.7;
-// Music sits at 40% of the effects level, so the soundtrack sits under the sounds.
-const MUSIC_LEVEL = SFX_LEVEL * 0.4;
 
-let settings: AudioSettings = { volume: 0.8, sfx: true, music: true };
+let settings: AudioSettings = { volume: 0.8, sfx: true, music: true, musicVolume: 0.4, track: 'night-shift' };
 let graph: Graph | null = null;
 let lastKey = 0;
 let tension = 0;
@@ -56,7 +58,7 @@ function applySettings(): void {
   const { ctx, sfxBus, musicBus } = graph;
   const now = ctx.currentTime;
   sfxBus.gain.setTargetAtTime(settings.sfx ? SFX_LEVEL * settings.volume : 0, now, 0.02);
-  musicBus.gain.setTargetAtTime(settings.music ? MUSIC_LEVEL * settings.volume : 0, now, 0.05);
+  musicBus.gain.setTargetAtTime(settings.music ? SFX_LEVEL * settings.volume * settings.musicVolume : 0, now, 0.05);
 }
 
 function context(): Graph | null {
@@ -116,12 +118,18 @@ export function startMusic(): void {
   const g = context();
   if (!g) return;
   if (!g.music) g.music = new MusicPlayer(g.ctx, g.musicBus);
-  if (!g.music.running) g.music.start();
+  if (!g.music.running) g.music.start(settings.track);
   setTension(tension);
 }
 
 /** Kept for existing callers. */
 export const startAmbience = startMusic;
+
+/** Switches the soundtrack with a crossfade. Before the first click it only remembers the choice. */
+export function setMusicTrack(track: MusicTrack): void {
+  settings = { ...settings, track };
+  graph?.music?.setTrack(track);
+}
 
 /** Called whenever the trace changes, and with 0 on menus. The soundtrack crossfades to match. */
 export function setTension(trace: number): void {
