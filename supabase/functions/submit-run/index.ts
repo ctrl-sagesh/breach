@@ -3,7 +3,7 @@
 // (bundled into engine.js by scripts/build-edge.mjs), and stores the score the replay produces.
 // Deno runtime. Deploy with: npx supabase functions deploy submit-run --no-verify-jwt
 
-import { MISSIONS, dailyMission, nicknameProblem, shiftDate, utcDate, validateRun } from './engine.js';
+import { MISSIONS, dailyMission, nicknameProblem, shiftDate, utcDate, validateRun } from '../_shared/engine.js';
 
 const ALLOWED_ORIGIN = Deno.env.get('ALLOWED_ORIGIN') ?? '*';
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? '';

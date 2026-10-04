@@ -4,7 +4,7 @@
 // Recovery keys are stored as a keyed hash (HMAC with a server-side pepper). Sync tokens are stored as a SHA-256 hash.
 // Restore and sync are rate limited through auth_attempts, and every save is checked for size before it is stored.
 
-import { admit, generateRecoveryKey, isWellFormedKey, mergeSaves, normalizeRecoveryKey, nicknameProblem, RESTORE_LIMIT } from './engine.js';
+import { admit, generateRecoveryKey, isWellFormedKey, mergeSaves, normalizeRecoveryKey, nicknameProblem, RESTORE_LIMIT } from '../_shared/engine.js';
 
 const ALLOWED_ORIGIN = Deno.env.get('ALLOWED_ORIGIN') ?? '*';
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? '';
