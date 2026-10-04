@@ -6,6 +6,7 @@ import { MISSIONS } from '../missions';
 import type { SaveData } from '../lib/save';
 import { buildShareCard, summarize } from '../lib/progress';
 import { Header, Screen } from './ui';
+import ShareBar from './ShareBar';
 
 interface EndScreenProps {
   save: SaveData;
@@ -66,6 +67,19 @@ export default function EndScreen({ save, onMenu }: EndScreenProps) {
       <pre className="panel mb-4 overflow-x-auto whitespace-pre-wrap p-4 text-sm leading-relaxed" aria-label="share text">
         {card}
       </pre>
+
+      <div className="mb-6">
+        <ShareBar
+          facts={{
+            label: 'CAMPAIGN',
+            tier: DIFFICULTY[tier].label,
+            rank: summary.rank.name,
+            score: summary.points,
+            detail: endingLabel ? `${summary.completed}/${summary.total} jobs · ${endingLabel}` : `${summary.completed}/${summary.total} jobs`,
+          }}
+          fileName="breach-campaign"
+        />
+      </div>
 
       <div className="flex flex-col gap-3 sm:flex-row">
         <button type="button" className="btn flex-1" onClick={onCopy}>

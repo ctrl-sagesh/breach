@@ -125,8 +125,13 @@ export default function WorldBackdrop() {
 
     const project = ([x, y]: [number, number]): [number, number] => [x * width, y * height];
 
+    const keepEl = document.querySelector<HTMLElement>('[data-keep-clear]');
+    let keep: DOMRect | null = null;
+    const clear = (x: number, y: number) => keep !== null && x > keep.left - 8 && x < keep.right + 8 && y > keep.top - 8 && y < keep.bottom + 8;
+
     const draw = (dt: number) => {
       frame++;
+      keep = keepEl ? keepEl.getBoundingClientRect() : null;
       if (frame % 60 === 0) colour = getComputedStyle(document.documentElement).getPropertyValue('--fg').trim() || colour;
       ctx.clearRect(0, 0, width, height);
 
@@ -144,7 +149,7 @@ export default function WorldBackdrop() {
       for (const col of columns) {
         if (!reduce) col.y += (col.speed * dt) / 1000;
         if (col.y > height + 20) col.y = -20;
-        ctx.fillText(CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)], col.x, col.y);
+        if (!clear(col.x, col.y)) ctx.fillText(CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)], col.x, col.y);
       }
 
       // Attack arcs with a bright head and a ping where each one lands.
@@ -165,19 +170,25 @@ export default function WorldBackdrop() {
         ctx.lineWidth = 1;
         ctx.globalAlpha = 0.5;
         ctx.beginPath();
+        let pen = false;
         for (let s = 0; s <= steps; s++) {
           const u = (s / steps) * headAt;
           const px = (1 - u) * (1 - u) * x0 + 2 * (1 - u) * u * cx + u * u * x1;
           const py = (1 - u) * (1 - u) * y0 + 2 * (1 - u) * u * cy + u * u * y1;
-          if (s === 0) ctx.moveTo(px, py);
-          else ctx.lineTo(px, py);
+          if (clear(px, py)) {
+            pen = false;
+            continue;
+          }
+          if (pen) ctx.lineTo(px, py);
+          else ctx.moveTo(px, py);
+          pen = true;
         }
         ctx.stroke();
         ctx.globalAlpha = 0.9;
         const hu = headAt;
         const hx = (1 - hu) * (1 - hu) * x0 + 2 * (1 - hu) * hu * cx + hu * hu * x1;
         const hy = (1 - hu) * (1 - hu) * y0 + 2 * (1 - hu) * hu * cy + hu * hu * y1;
-        ctx.fillRect(hx - 1.5, hy - 1.5, 3, 3);
+        if (!clear(hx, hy)) ctx.fillRect(hx - 1.5, hy - 1.5, 3, 3);
         if (arc.t > 0.9) {
           ctx.globalAlpha = (1 - arc.t) * 3;
           ctx.beginPath();

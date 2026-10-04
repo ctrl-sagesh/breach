@@ -5,3 +5,7 @@ next-env.d.ts
 *.tsbuildinfo
 
 .vercel
+
+# Local secrets and keys. Never commit these.
+.env*.local
+.env

@@ -12,11 +12,11 @@ const GREEN = '#33ff66';
 const DIM = '#1b7a3a';
 const EDGE = '#14412a';
 
+// Arcs live in the empty right-hand column, so they never cross the title, the tagline or the prompt.
 const arcs = [
-  { x1: 160, y1: 300, x2: 460, y2: 210 },
-  { x1: 460, y1: 210, x2: 760, y2: 330 },
-  { x1: 760, y1: 330, x2: 1040, y2: 200 },
-  { x1: 300, y1: 430, x2: 700, y2: 470 },
+  { x1: 860, y1: 160, x2: 1120, y2: 120 },
+  { x1: 880, y1: 120, x2: 1080, y2: 230 },
+  { x1: 860, y1: 470, x2: 1120, y2: 540 },
 ];
 
 const arcPath = ({ x1, y1, x2, y2 }) => {

@@ -147,6 +147,7 @@ export const fileCommands: CommandSpec[] = [
         } else if (!canRead(s.machine, abs, s.frame.user)) {
           out.print(`cat: ${target}: Permission denied`, 'err');
         } else {
+          s.reads.add(`${s.frame.machineId}:${abs}`);
           for (const line of s.machine.files[abs].content.split('\n')) out.print(line);
         }
       }

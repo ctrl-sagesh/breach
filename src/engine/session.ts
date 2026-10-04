@@ -97,6 +97,11 @@ export class GameSession {
   pending: Pending | null = null;
   endingId: string | null = null;
   failedLogins = 0;
+  /** Facts the achievements read at the end of an attempt. */
+  readonly reads = new Set<string>();
+  sudoTries = 0;
+  usedAliases = false;
+  usedPipe = false;
   /** Discoveries and player notes for this attempt. */
   readonly clues = new ClueLog();
 
@@ -252,6 +257,7 @@ export class GameSession {
       out.print('bash: syntax error near unexpected token `|\'', 'err');
       return;
     }
+    if (segments.length > 1) this.usedPipe = true;
     let stdin: Stdin = null;
     for (let i = 0; i < segments.length; i++) {
       const [name, ...args] = splitCommand(segments[i]);
@@ -262,6 +268,7 @@ export class GameSession {
         if (near.length) out.print(`Did you mean: ${near.join(', ')}?`, 'dim');
         return;
       }
+      if (command.name !== name) this.usedAliases = true;
       if (i === segments.length - 1) {
         command.run(this, args, out, stdin);
         return;

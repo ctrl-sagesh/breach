@@ -13,7 +13,7 @@ const LOGO = `██████╗ ██████╗ ███████�
 ██████╔╝██║  ██║███████╗██║  ██║╚██████╗██║  ██║
 ╚═════╝ ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝ ╚═════╝╚═╝  ╚═╝`;
 
-export type MenuTarget = 'select' | 'settings' | 'card';
+export type MenuTarget = 'select' | 'settings' | 'card' | 'daily' | 'board' | 'achievements';
 
 interface MainMenuProps {
   save: SaveData;
@@ -43,6 +43,18 @@ export default function MainMenu({ save, onNavigate }: MainMenuProps) {
         <button type="button" className="btn flex items-center gap-3 text-left" onClick={() => onNavigate('select')}>
           <Icon name="play" />
           {started ? 'Continue jobs' : 'Start first job'}
+        </button>
+        <button type="button" className="btn flex items-center gap-3 text-left" onClick={() => onNavigate('daily')}>
+          <Icon name="calendar" />
+          Daily challenge
+        </button>
+        <button type="button" className="btn flex items-center gap-3 text-left" onClick={() => onNavigate('board')}>
+          <Icon name="radar" />
+          Global board
+        </button>
+        <button type="button" className="btn flex items-center gap-3 text-left" onClick={() => onNavigate('achievements')}>
+          <Icon name="check" />
+          Achievements
         </button>
         <button type="button" className="btn flex items-center gap-3 text-left" onClick={() => onNavigate('settings')}>
           <Icon name="settings" />

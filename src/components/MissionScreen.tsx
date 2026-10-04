@@ -19,6 +19,7 @@ interface MissionScreenProps {
   onWon: (session: GameSession) => void;
   onRetry: () => void;
   onAbort: () => void;
+  onCommand?: (raw: string) => void;
 }
 
 type Phase = 'playing' | 'tearing' | 'traced';
@@ -27,7 +28,7 @@ type Flash = { kind: 'granted' | 'denied'; id: number } | null;
 const ALARM_TRACE = 75;
 const COUNTDOWN_WARN = 120;
 
-export default function MissionScreen({ mission, session, attemptKey, speed, reduceMotion, onWon, onRetry, onAbort }: MissionScreenProps) {
+export default function MissionScreen({ mission, session, attemptKey, speed, reduceMotion, onWon, onRetry, onAbort, onCommand }: MissionScreenProps) {
   const [, setTick] = useState(0);
   const [phase, setPhase] = useState<Phase>('playing');
   const [flash, setFlash] = useState<Flash>(null);
@@ -120,6 +121,7 @@ export default function MissionScreen({ mission, session, attemptKey, speed, red
             onUpdate={handleUpdate}
             onQuit={onAbort}
             onFlash={handleFlash}
+            onCommand={onCommand}
           />
         ) : null}
       </div>

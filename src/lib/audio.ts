@@ -4,6 +4,7 @@
 // Levels are kept low on purpose: nothing should be harsh.
 
 import type { SoundEvent } from '../engine/types';
+import { MusicPlayer } from './music';
 
 export interface AudioSettings {
   volume: number; // 0 to 1
@@ -15,12 +16,13 @@ interface Graph {
   ctx: AudioContext;
   sfxBus: GainNode;
   musicBus: GainNode;
-  drone: { filter: BiquadFilterNode; gain: GainNode } | null;
+  music: MusicPlayer | null;
 }
 
 const MASTER = 0.5; // global headroom
 const SFX_LEVEL = 0.7;
-const MUSIC_LEVEL = 0.22;
+// Music sits at 40% of the effects level, so the soundtrack sits under the sounds.
+const MUSIC_LEVEL = SFX_LEVEL * 0.4;
 
 let settings: AudioSettings = { volume: 0.8, sfx: true, music: true };
 let graph: Graph | null = null;
@@ -41,7 +43,7 @@ function build(): Graph | null {
     const musicBus = ctx.createGain();
     sfxBus.connect(master);
     musicBus.connect(master);
-    graph = { ctx, sfxBus, musicBus, drone: null };
+    graph = { ctx, sfxBus, musicBus, music: null };
     applySettings();
     return graph;
   } catch {
@@ -106,43 +108,25 @@ function noise(g: Graph, duration: number, volume: number): void {
   src.start();
 }
 
-/** Low drone under the whole game. Tension (0-100, the trace) opens the filter and raises the level. */
-export function startAmbience(): void {
+/**
+ * Starts the soundtrack. Call it from a user gesture (the browser blocks sound until one happens).
+ * Menus and the landing page sit at intensity 0. Missions follow the trace through setTension.
+ */
+export function startMusic(): void {
   const g = context();
-  if (!g || g.drone) return;
-  const { ctx, musicBus } = g;
-  const filter = ctx.createBiquadFilter();
-  filter.type = 'lowpass';
-  filter.frequency.value = 220;
-  filter.Q.value = 0.7;
-  const gain = ctx.createGain();
-  gain.gain.value = 0.5;
-  filter.connect(gain).connect(musicBus);
-  for (const [freq, type, level] of [
-    [55, 'sine', 0.9],
-    [82.4, 'triangle', 0.35],
-    [55.6, 'sawtooth', 0.12],
-  ] as const) {
-    const osc = ctx.createOscillator();
-    const amp = ctx.createGain();
-    osc.type = type;
-    osc.frequency.value = freq;
-    amp.gain.value = level;
-    osc.connect(amp).connect(filter);
-    osc.start();
-  }
-  g.drone = { filter, gain };
+  if (!g) return;
+  if (!g.music) g.music = new MusicPlayer(g.ctx, g.musicBus);
+  if (!g.music.running) g.music.start();
   setTension(tension);
 }
 
-/** Called whenever the trace changes. Smoothly tightens the drone as the trace climbs. */
+/** Kept for existing callers. */
+export const startAmbience = startMusic;
+
+/** Called whenever the trace changes, and with 0 on menus. The soundtrack crossfades to match. */
 export function setTension(trace: number): void {
   tension = Math.max(0, Math.min(100, trace));
-  const g = graph;
-  if (!g?.drone) return;
-  const t = g.ctx.currentTime;
-  g.drone.filter.frequency.setTargetAtTime(220 + tension * 5, t, 0.4);
-  g.drone.gain.gain.setTargetAtTime(0.5 + tension * 0.01, t, 0.4);
+  graph?.music?.setIntensity(tension / 100);
 }
 
 export function play(event: SoundEvent): void {

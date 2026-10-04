@@ -1,18 +1,30 @@
 'use client';
 
-// Top-level screen router. Owns the save data, the current mission attempt, and transitions between screens.
+// Top-level screen router. Owns the save data, the current attempt, the run log that feeds the leaderboard,
+// achievements, and transitions between screens.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { GameSession } from '../engine/session';
 import { rankForScore, scoreMission, type MissionResult } from '../engine/scoring';
 import { DIFFICULTY, pointsFor } from '../engine/difficulty';
+import type { MissionDef, Tier } from '../engine/types';
+import type { RunCommand } from '../engine/replay';
 import { MISSIONS } from '../missions';
-import { setAudioSettings, startAmbience } from '../lib/audio';
+import { setAudioSettings, setTension, startMusic } from '../lib/audio';
 import { DEFAULT_SAVE, effectiveReduceMotion, loadSave, persistSave, type SaveData } from '../lib/save';
+import { campaignDone, factsFromWin, newlyUnlocked, type AchievementDef } from '../lib/achievements';
+import { dailyMission, dailyNumber, streakFor, utcDate } from '../lib/daily';
+import { realWorldFor } from '../lib/realworld';
+import { buildSubmission, getPlayerId, type Submission } from '../lib/leaderboard';
 import { summarize } from '../lib/progress';
+import type { ShareFacts } from '../lib/share';
+import { AchievementToast } from './Achievements';
+import AchievementsScreen from './Achievements';
 import Boot from './Boot';
+import BoardScreen from './BoardScreen';
 import Briefing from './Briefing';
 import Debrief from './Debrief';
+import DailyScreen from './DailyScreen';
 import EndScreen from './EndScreen';
 import Landing from './Landing';
 import MainMenu from './MainMenu';
@@ -28,13 +40,30 @@ type Screen =
   | { name: 'select' }
   | { name: 'settings' }
   | { name: 'card' }
+  | { name: 'daily' }
+  | { name: 'board' }
+  | { name: 'achievements' }
   | { name: 'briefing'; index: number }
-  | { name: 'play'; index: number }
-  | { name: 'transfer'; index: number; result: MissionResult }
-  | { name: 'debrief'; index: number; result: MissionResult };
+  /** `date` is set for the daily job, which is generated from the date rather than taken from the list. */
+  | { name: 'play'; index: number; date?: string }
+  | { name: 'transfer'; index: number; result: MissionResult; date?: string }
+  | { name: 'debrief'; index: number; result: MissionResult; date?: string };
 
 /** How long the CRT switch-off takes before the job board appears. */
 const CRT_OFF_MS = 420;
+
+/** What a finished attempt sends to the board, kept until the debrief posts it. */
+interface LastRun {
+  missionId: string;
+  tier: Tier;
+  scope: 'campaign' | 'daily';
+  date?: string;
+  commands: RunCommand[];
+}
+
+function missionFor(index: number, date?: string): MissionDef {
+  return date ? dailyMission(date) : MISSIONS[index];
+}
 
 export default function GameApp() {
   const [save, setSave] = useState<SaveData>(DEFAULT_SAVE);
@@ -44,11 +73,18 @@ export default function GameApp() {
   const [wipeKey, setWipeKey] = useState(0);
   const [closing, setClosing] = useState(false);
   const [systemReduce, setSystemReduce] = useState(false);
+  const [toast, setToast] = useState<AchievementDef[]>([]);
+  const [lastRun, setLastRun] = useState<LastRun | null>(null);
+  const [tier, setTierState] = useState<Tier>(DEFAULT_SAVE.tier);
   const lastScreen = useRef<Screen['name']>('boot');
+  /** The attempt's command log, timed from the moment the session opened. Replayed by the server. */
+  const run = useRef<{ startedAt: number; commands: RunCommand[] }>({ startedAt: 0, commands: [] });
 
   // Storage and matchMedia are read on the client only, so the static export pre-renders safely.
   useEffect(() => {
-    setSave(loadSave());
+    const loaded = loadSave();
+    setSave(loaded);
+    setTierState(loaded.tier);
     const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
     setSystemReduce(mq.matches);
     const onChange = () => setSystemReduce(mq.matches);
@@ -88,6 +124,11 @@ export default function GameApp() {
     }
   }, [screen.name]);
 
+  // Menus and the landing page are calm. The soundtrack only follows the trace inside a mission.
+  useEffect(() => {
+    if (screen.name !== 'play') setTension(0);
+  }, [screen.name]);
+
   const reduceMotion = effectiveReduceMotion(save.motion, systemReduce);
 
   const update = useCallback((patch: Partial<SaveData>) => {
@@ -99,11 +140,36 @@ export default function GameApp() {
   }, []);
 
   const onBootDone = useCallback(() => setScreen({ name: 'landing' }), []);
-  // Ambient hum starts on the first click or key. Browsers do not allow sound before that.
-  const onFirstGesture = useCallback(() => startAmbience(), []);
+  // Ambient music starts on the first click or key. Browsers do not allow sound before that.
+  const onFirstGesture = useCallback(() => startMusic(), []);
   const toMenu = useCallback(() => setScreen({ name: 'menu' }), []);
+  const toDaily = useCallback(() => setScreen({ name: 'daily' }), []);
+
+  const setTier = (next: Tier) => {
+    setTierState(next);
+    update({ tier: next });
+  };
+
+  /** Sudo tries are a lifetime counter. Add this attempt's tries when the attempt ends. */
+  const flushSudo = (s: GameSession | null) => {
+    if (!s || s.sudoTries === 0) return;
+    setSave((prev) => {
+      const next = { ...prev, counters: { ...prev.counters, sudoTries: prev.counters.sudoTries + s.sudoTries } };
+      persistSave(next);
+      return next;
+    });
+  };
+
+  const openSession = (mission: MissionDef, sessionTier: Tier) => {
+    run.current = { startedAt: Date.now(), commands: [] };
+    const s = new GameSession(mission, { tier: sessionTier });
+    setSession(s);
+    setAttemptKey((k) => k + 1);
+    return s;
+  };
 
   const beginAttempt = (index: number) => {
+    flushSudo(session);
     const mission = MISSIONS[index];
     setSave((prev) => {
       const next = {
@@ -116,13 +182,36 @@ export default function GameApp() {
       persistSave(next);
       return next;
     });
-    setSession(new GameSession(mission, { tier: save.tier }));
-    setAttemptKey((k) => k + 1);
+    openSession(mission, save.tier);
     setScreen({ name: 'play', index });
   };
 
-  const onWon = (index: number, s: GameSession) => {
-    const mission = MISSIONS[index];
+  /** One attempt per day per tier. The daily screen blocks a second start. */
+  const beginDaily = () => {
+    flushSudo(session);
+    const date = utcDate();
+    const mission = dailyMission(date);
+    setSave((prev) => {
+      const next = {
+        ...prev,
+        attempts: {
+          ...prev.attempts,
+          [prev.tier]: { ...prev.attempts[prev.tier], [mission.id]: (prev.attempts[prev.tier][mission.id] ?? 0) + 1 },
+        },
+      };
+      persistSave(next);
+      return next;
+    });
+    openSession(mission, save.tier);
+    setScreen({ name: 'play', index: -1, date });
+  };
+
+  const onCommand = useCallback((raw: string) => {
+    run.current.commands.push({ t: Math.max(0, Date.now() - run.current.startedAt), cmd: raw });
+  }, []);
+
+  const onWon = (index: number, s: GameSession, date?: string) => {
+    const mission = missionFor(index, date);
     const base = scoreMission(s.elapsedSeconds(), s.trace, s.hintsUsed);
     const result: MissionResult = {
       score: base,
@@ -133,26 +222,52 @@ export default function GameApp() {
       hints: s.hintsUsed,
       endingId: s.endingId ?? undefined,
     };
-    setSave((prev) => {
-      const tierResults = prev.completed[s.tier];
-      const best = tierResults[mission.id];
-      const keep = !best || result.points >= best.points ? result : best;
-      const next = { ...prev, completed: { ...prev.completed, [s.tier]: { ...tierResults, [mission.id]: keep } } };
-      persistSave(next);
-      return next;
-    });
+    const now = new Date();
+    const today = utcDate(now);
+    const isDaily = Boolean(date);
+
+    // Next save state, computed once so achievements read the same numbers that get saved.
+    const tierResults = save.completed[s.tier];
+    const best = tierResults[mission.id];
+    const keep = !best || result.points >= best.points ? result : best;
+    const completed = isDaily ? save.completed : { ...save.completed, [s.tier]: { ...tierResults, [mission.id]: keep } };
+    const dailies = isDaily ? { ...save.dailies, [today]: { ...save.dailies[today], [s.tier]: result } } : save.dailies;
+    const sudoTotal = save.counters.sudoTries + s.sudoTries;
+    const doneDates = Object.keys(dailies).filter((d) => Object.values(dailies[d] ?? {}).some(Boolean));
+    const streak = streakFor(doneDates, today);
+    const campaignDoneOnTier = !isDaily && campaignDone(completed[s.tier]);
+
+    const facts = factsFromWin(s, { score: base, isDaily, campaignDoneOnTier, streak, sudoTotal, now });
+    const unlocked = newlyUnlocked(facts, save.achievements);
+
+    const next: SaveData = {
+      ...save,
+      completed,
+      dailies,
+      counters: { ...save.counters, sudoTries: sudoTotal },
+      achievements: [...save.achievements, ...unlocked.map((a) => a.id)],
+    };
+    persistSave(next);
+    setSave(next);
+    if (unlocked.length) setToast(unlocked);
+
+    setLastRun({ missionId: mission.id, tier: s.tier, scope: isDaily ? 'daily' : 'campaign', date, commands: [...run.current.commands] });
     setSession(null);
-    setScreen({ name: 'transfer', index, result });
+    setScreen({ name: 'transfer', index, result, date });
   };
 
   const onTransferDone = useCallback(() => {
-    setScreen((current) => (current.name === 'transfer' ? { name: 'debrief', index: current.index, result: current.result } : current));
+    setScreen((current) =>
+      current.name === 'transfer' ? { name: 'debrief', index: current.index, result: current.result, date: current.date } : current,
+    );
   }, []);
 
   const abortMission = () => {
+    flushSudo(session);
+    const back: Screen = screen.name === 'play' && screen.date ? { name: 'daily' } : { name: 'select' };
     if (reduceMotion) {
       setSession(null);
-      setScreen({ name: 'select' });
+      setScreen(back);
       return;
     }
     // CRT switch-off, then the job board.
@@ -160,7 +275,7 @@ export default function GameApp() {
     window.setTimeout(() => {
       setClosing(false);
       setSession(null);
-      setScreen({ name: 'select' });
+      setScreen(back);
     }, CRT_OFF_MS);
   };
 
@@ -177,11 +292,16 @@ export default function GameApp() {
       music: save.music,
       volume: save.volume,
       motion: save.motion,
+      // Identity stays. Progress, achievements and dailies go.
+      playerId: save.playerId,
+      nickname: save.nickname,
     };
     persistSave(next);
     setSave(next);
   };
 
+  const doneDates = Object.keys(save.dailies).filter((d) => Object.values(save.dailies[d] ?? {}).some(Boolean));
+  const dailyStreak = streakFor(doneDates, utcDate());
   const hasSave = summarize(save).completed > 0 || Object.keys(save.attempts[save.tier]).length > 0;
 
   let body: React.ReactNode = null;
@@ -194,8 +314,10 @@ export default function GameApp() {
         <Landing
           tier={save.tier}
           hasSave={hasSave}
+          dailyStreak={dailyStreak}
           onStart={toMenu}
           onContinue={() => setScreen({ name: 'select' })}
+          onDaily={toDaily}
           onFirstGesture={onFirstGesture}
         />
       );
@@ -207,20 +329,25 @@ export default function GameApp() {
           onNavigate={(target) => {
             if (target === 'select') setScreen({ name: 'select' });
             else if (target === 'settings') setScreen({ name: 'settings' });
+            else if (target === 'daily') setScreen({ name: 'daily' });
+            else if (target === 'board') setScreen({ name: 'board' });
+            else if (target === 'achievements') setScreen({ name: 'achievements' });
             else setScreen({ name: 'card' });
           }}
         />
       );
       break;
     case 'select':
-      body = (
-        <MissionSelect
-          save={save}
-          onTier={(tier) => update({ tier })}
-          onOpen={(index) => setScreen({ name: 'briefing', index })}
-          onBack={toMenu}
-        />
-      );
+      body = <MissionSelect save={save} onTier={setTier} onOpen={(index) => setScreen({ name: 'briefing', index })} onBack={toMenu} />;
+      break;
+    case 'daily':
+      body = <DailyScreen save={save} tier={save.tier} onTier={setTier} onStart={beginDaily} onBoard={() => setScreen({ name: 'board' })} onBack={toMenu} />;
+      break;
+    case 'board':
+      body = <BoardScreen tier={save.tier} onTier={setTier} onBack={toMenu} />;
+      break;
+    case 'achievements':
+      body = <AchievementsScreen unlocked={save.achievements} onBack={toMenu} />;
       break;
     case 'settings':
       body = <Settings save={save} onChange={update} onReset={resetProgress} onBack={toMenu} />;
@@ -236,7 +363,7 @@ export default function GameApp() {
           tier={save.tier}
           attempts={save.attempts[save.tier][mission.id] ?? 0}
           completed={Boolean(save.completed[save.tier][mission.id])}
-          onTier={(tier) => update({ tier })}
+          onTier={setTier}
           onAccept={() => beginAttempt(screen.index)}
           onBack={() => setScreen({ name: 'select' })}
         />
@@ -246,17 +373,20 @@ export default function GameApp() {
     case 'play': {
       if (!session) break;
       const index = screen.index;
+      const date = screen.date;
+      const mission = missionFor(index, date);
       body = (
         <div key={attemptKey} className={closing ? 'crt-off' : 'crt-on'}>
           <MissionScreen
-            mission={MISSIONS[index]}
+            mission={mission}
             session={session}
             attemptKey={attemptKey}
             speed={save.typing}
             reduceMotion={reduceMotion}
-            onWon={(s) => onWon(index, s)}
-            onRetry={() => beginAttempt(index)}
+            onWon={(s) => onWon(index, s, date)}
+            onRetry={() => (date ? toDaily() : beginAttempt(index))}
             onAbort={abortMission}
+            onCommand={onCommand}
           />
         </div>
       );
@@ -267,17 +397,46 @@ export default function GameApp() {
       break;
     case 'debrief': {
       const index = screen.index;
+      const date = screen.date;
+      const mission = missionFor(index, date);
+      const result = screen.result;
+      const rank = rankForScore(result.score).name;
+      const share: ShareFacts = date
+        ? { label: `DAILY ${dailyNumber(date)}`, tier: DIFFICULTY[result.tier].label, rank, score: result.points, streak: streakFor(doneDates, date) }
+        : { label: `JOB ${String(mission.number).padStart(2, '0')} · ${mission.codename}`, tier: DIFFICULTY[result.tier].label, rank, score: result.points };
+      const posting = lastRun && lastRun.missionId === mission.id && lastRun.tier === result.tier ? lastRun : null;
+      const board = posting
+        ? {
+            nickname: save.nickname,
+            build: (nickname: string): Submission =>
+              buildSubmission({
+                playerId: getPlayerId(),
+                nickname,
+                scope: posting.scope,
+                date: posting.date,
+                missionId: posting.missionId,
+                tier: posting.tier,
+                commands: posting.commands,
+              }),
+            onNickname: (nickname: string) => update({ nickname }),
+          }
+        : null;
       body = (
         <Debrief
-          mission={MISSIONS[index]}
-          result={screen.result}
-          hintLimit={DIFFICULTY[screen.result.tier].hintLimit}
-          rankName={rankForScore(screen.result.score).name}
+          mission={mission}
+          result={result}
+          hintLimit={DIFFICULTY[result.tier].hintLimit}
+          rankName={rank}
           reduceMotion={reduceMotion}
-          isLast={index === MISSIONS.length - 1}
-          onNext={() => setScreen({ name: 'briefing', index: index + 1 })}
+          isLast={!date && index === MISSIONS.length - 1}
+          nextLabel={date ? 'Daily menu' : undefined}
+          onNext={() => (date ? toDaily() : setScreen({ name: 'briefing', index: index + 1 }))}
           onCampaignEnd={() => setScreen({ name: 'card' })}
           onMenu={toMenu}
+          card={realWorldFor(mission)}
+          share={share}
+          fileName={date ? `breach-daily-${date}` : `breach-job-${String(mission.number).padStart(2, '0')}`}
+          board={board}
         />
       );
       break;
@@ -288,6 +447,7 @@ export default function GameApp() {
     <div className={`relative min-h-dvh ${reduceMotion ? 'reduce-motion' : ''}`}>
       {body}
       {wipeKey > 0 && !reduceMotion ? <div key={wipeKey} className="wipe" aria-hidden="true" /> : null}
+      <AchievementToast items={toast} onDismiss={() => setToast([])} />
       {save.crt ? (
         <>
           <div className="crt-scanlines" aria-hidden="true" />

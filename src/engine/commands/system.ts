@@ -147,6 +147,7 @@ export const systemCommands: CommandSpec[] = [
     summary: 'run a command as root, if your account is in the sudoers file',
     example: 'sudo cat /etc/shadow',
     run(s, args, out) {
+      s.sudoTries++;
       if (args.length === 0) {
         out.print('usage: sudo <command>', 'err');
         return;

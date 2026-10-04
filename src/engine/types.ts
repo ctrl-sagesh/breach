@@ -143,6 +143,8 @@ export interface MissionDef {
   tierOverrides?: TierOverrides;
   /** Walkthrough used by the test suite to prove the mission is beatable. Entries are typed exactly as a player would type them. */
   solution: string[];
+  /** Daily jobs name the real-world idea they teach, so the debrief card can match it. */
+  realWorldKey?: string;
   /** The same walkthrough typed with the real Kali command names. The tests play it too. */
   kaliSolution: string[];
 }

@@ -9,6 +9,12 @@ import type { MissionDef, StoryLine } from '../engine/types';
 import { DIFFICULTY } from '../engine/difficulty';
 import { play } from '../lib/audio';
 import { formatTime, Header, Screen } from './ui';
+import RealWorldCard from './RealWorldCard';
+import BoardPanel from './BoardPanel';
+import ShareBar from './ShareBar';
+import type { RealWorldCard as Card } from '../lib/realworld';
+import type { ShareFacts } from '../lib/share';
+import type { Submission } from '../lib/leaderboard';
 
 interface DebriefProps {
   mission: MissionDef;
@@ -20,6 +26,11 @@ interface DebriefProps {
   onNext: () => void;
   onCampaignEnd: () => void;
   onMenu: () => void;
+  nextLabel?: string;
+  card: Card | null;
+  share: ShareFacts;
+  fileName: string;
+  board: { nickname?: string; build: (nickname: string) => Submission; onNickname: (nickname: string) => void } | null;
 }
 
 const COUNT_FRAMES = 18;
@@ -38,7 +49,7 @@ function revealed(paras: string[], n: number): string[] {
   });
 }
 
-export default function Debrief({ mission, result, hintLimit, rankName, reduceMotion, isLast, onNext, onCampaignEnd, onMenu }: DebriefProps) {
+export default function Debrief({ mission, result, hintLimit, rankName, reduceMotion, isLast, nextLabel, onNext, onCampaignEnd, onMenu, card, share, fileName, board }: DebriefProps) {
   const ending = mission.endings?.find((e) => e.id === result.endingId);
   const story = paragraphs(mission.debrief);
   const storyLength = story.reduce((n, p) => n + p.length, 0);
@@ -138,6 +149,16 @@ export default function Debrief({ mission, result, hintLimit, rankName, reduceMo
         </div>
       ) : null}
 
+      {storyDone && card ? <RealWorldCard card={card} /> : null}
+
+      {storyDone && board ? <BoardPanel nickname={board.nickname} build={board.build} onNickname={board.onNickname} /> : null}
+
+      {storyDone ? (
+        <div className="mb-6">
+          <ShareBar facts={share} fileName={fileName} />
+        </div>
+      ) : null}
+
       <div className="mt-auto flex flex-col gap-3 sm:flex-row">
         {isLast ? (
           <button type="button" className="btn flex-1" onClick={onCampaignEnd}>
@@ -145,7 +166,7 @@ export default function Debrief({ mission, result, hintLimit, rankName, reduceMo
           </button>
         ) : (
           <button type="button" className="btn flex-1" onClick={onNext}>
-            Next job
+            {nextLabel ?? 'Next job'}
           </button>
         )}
         <button type="button" className="btn flex-1" onClick={onMenu}>

@@ -24,6 +24,16 @@ export interface SaveData {
   /** 0 to 1. Scales everything. */
   volume: number;
   motion: MotionSetting;
+  /** Unlocked achievement ids. Stored here, never sent anywhere. */
+  achievements: string[];
+  /** Lifetime counters the achievements read. */
+  counters: { sudoTries: number };
+  /** Daily challenge results by UTC date, then tier. One attempt per day per tier. */
+  dailies: Record<string, Partial<Record<Tier, MissionResult>>>;
+  /** Anonymous id for the leaderboard. Created on first use, never tied to a name or account. */
+  playerId?: string;
+  /** Nickname for the leaderboard, 3 to 16 characters. */
+  nickname?: string;
 }
 
 export const SAVE_KEY = 'breach.save.v1';
@@ -44,6 +54,9 @@ export const DEFAULT_SAVE: SaveData = {
   music: true,
   volume: 0.8,
   motion: 'system',
+  achievements: [],
+  counters: { sudoTries: 0 },
+  dailies: {},
 };
 
 function freshDefaults(): SaveData {

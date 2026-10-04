@@ -7,6 +7,7 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { DIFFICULTY, TIERS } from '../engine/difficulty';
 import type { Line, Tier } from '../engine/types';
 import { landingReply, TAGLINE } from '../lib/landing';
+import { dailyNumber, msUntilReset, utcDate } from '../lib/daily';
 import Decrypt from './Decrypt';
 import Icon from './Icon';
 import WorldBackdrop from './WorldBackdrop';
@@ -16,6 +17,8 @@ interface LandingProps {
   hasSave: boolean;
   onStart: () => void;
   onContinue: () => void;
+  onDaily: () => void;
+  dailyStreak: number;
   /** Fires once, on the first click or key. Browsers only allow audio after a gesture. */
   onFirstGesture: () => void;
 }
@@ -26,8 +29,18 @@ const INTRO: Line[] = [
 
 const LOG_LIMIT = 10;
 
-export default function Landing({ tier, hasSave, onStart, onContinue, onFirstGesture }: LandingProps) {
+function countdownText(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  return [Math.floor(total / 3600), Math.floor((total % 3600) / 60), total % 60].map((n) => String(n).padStart(2, '0')).join(':');
+}
+
+export default function Landing({ tier, hasSave, onStart, onContinue, onDaily, dailyStreak, onFirstGesture }: LandingProps) {
   const [typed, setTyped] = useState(0);
+  const [untilReset, setUntilReset] = useState(msUntilReset());
+  useEffect(() => {
+    const timer = window.setInterval(() => setUntilReset(msUntilReset()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
   const [log, setLog] = useState<Line[]>([]);
   const [input, setInput] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
@@ -91,7 +104,7 @@ export default function Landing({ tier, hasSave, onStart, onContinue, onFirstGes
       <WorldBackdrop />
       <div className="landing-vignette pointer-events-none fixed inset-0" aria-hidden="true" />
 
-      <div className="relative z-10 w-full max-w-2xl">
+      <div className="relative z-10 w-full max-w-2xl" data-keep-clear>
         <h1 className="glow mb-1 text-center text-3xl font-bold tracking-[0.35em] sm:text-4xl">
           <Decrypt text="BREACH" />
         </h1>
@@ -167,13 +180,19 @@ export default function Landing({ tier, hasSave, onStart, onContinue, onFirstGes
           </div>
         </section>
 
-        <section className="panel flex items-center gap-3 p-3 text-xs" aria-label="daily challenge">
+        <section className="panel flex flex-wrap items-center gap-3 p-3 text-xs" aria-label="daily challenge">
           <Icon name="calendar" size={24} />
-          <div className="flex-1">
-            <p className="tracking-widest text-[var(--dim)]">DAILY CHALLENGE</p>
-            <p>A fresh breach every day. Coming soon.</p>
+          <div className="min-w-[10rem] flex-1">
+            <p className="tracking-widest text-[var(--dim)]">DAILY {dailyNumber(utcDate())}</p>
+            <p>
+              Next job in <span className="glow tabular-nums">{countdownText(untilReset)}</span>
+              {dailyStreak > 0 ? <> · streak {dailyStreak} day{dailyStreak === 1 ? '' : 's'}</> : null}
+            </p>
           </div>
-          <span className="border border-[var(--edge)] px-2 py-1 text-[10px] tracking-widest text-[var(--dim)]">SOON</span>
+          <button type="button" className="btn flex items-center gap-2 !min-h-[36px] text-xs" onClick={onDaily}>
+            <Icon name="play" size={14} />
+            Today's job
+          </button>
         </section>
       </div>
     </main>

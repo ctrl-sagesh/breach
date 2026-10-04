@@ -6,6 +6,7 @@
 
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
 import { WORDLIST } from '../engine/commands/crypto';
+import { CANCEL_MARK } from '../engine/replay';
 import { Out, type GameSession } from '../engine/session';
 import type { Line } from '../engine/types';
 import { play } from '../lib/audio';
@@ -23,6 +24,8 @@ export interface TerminalProps {
   onUpdate: () => void;
   onQuit: () => void;
   onFlash: (kind: 'granted' | 'denied') => void;
+  /** Every line the player sends, in order, with Ctrl+C at a question logged as CANCEL_MARK. Feeds the replay. */
+  onCommand?: (raw: string) => void;
 }
 
 /** Commands that run a password attack. They show the guesser for a moment before the result. */
@@ -115,7 +118,7 @@ function Prompt({ session }: { session: GameSession }) {
   );
 }
 
-export default function Terminal({ session, speed, onUpdate, onQuit, onFlash }: TerminalProps) {
+export default function Terminal({ session, speed, onUpdate, onQuit, onFlash, onCommand }: TerminalProps) {
   const [entries, setEntries] = useState<Entry[]>(() => toEntries(session.intro(), speed));
   const [input, setInput] = useState('');
   const [histIndex, setHistIndex] = useState<number | null>(null);
@@ -168,6 +171,7 @@ export default function Terminal({ session, speed, onUpdate, onQuit, onFlash }: 
 
   const run = (raw: string) => {
     if (session.finished) return;
+    onCommand?.(raw);
     setEntries(completeAll);
     setInput('');
     setHistIndex(null);
@@ -236,7 +240,10 @@ export default function Terminal({ session, speed, onUpdate, onQuit, onFlash }: 
         setHistIndex(null);
       } else {
         const o = new Out();
-        if (session.cancelPending(o)) append(o.lines, false);
+        if (session.cancelPending(o)) {
+          onCommand?.(CANCEL_MARK);
+          append(o.lines, false);
+        }
       }
       return;
     }
