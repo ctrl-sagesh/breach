@@ -39,6 +39,12 @@ export interface SaveData {
   track: MusicTrack;
   /** Music level, separate from effects. 0 to 1. */
   musicVolume: number;
+  /** Mechanical keyboard sound on typing. Its own toggle and level, separate from Effects. */
+  keySounds: boolean;
+  /** 0 to 1. */
+  keySoundsVolume: number;
+  /** Tiny per-key vibration on devices that support it. Off by default. */
+  keyHaptics: boolean;
   /** Cloud sync: the recovery key shown at registration (kept on this device only) and the sync token. */
   recoveryKey?: string;
   syncToken?: string;
@@ -74,6 +80,9 @@ export const DEFAULT_SAVE: SaveData = {
   history: [],
   track: 'night-shift',
   musicVolume: 0.4,
+  keySounds: true,
+  keySoundsVolume: 0.5,
+  keyHaptics: false,
 };
 
 function freshDefaults(): SaveData {

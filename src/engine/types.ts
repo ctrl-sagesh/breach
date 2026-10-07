@@ -12,6 +12,9 @@ export interface Line {
 
 export type SoundEvent =
   | 'key'
+  | 'key-space'
+  | 'key-enter'
+  | 'key-backspace'
   | 'command'
   | 'error'
   | 'enter'

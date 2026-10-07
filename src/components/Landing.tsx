@@ -3,11 +3,13 @@
 // The first screen people see. A live terminal with a typed tagline, a big START button for people who do not type,
 // the difficulty tiers, a daily challenge slot, and Continue when a save exists. Behind it runs the world backdrop.
 
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
 import { DIFFICULTY, TIERS } from '../engine/difficulty';
 import type { Line, Tier } from '../engine/types';
 import { landingReply, TAGLINE } from '../lib/landing';
 import { trackLandingView, trackStart } from '../lib/analytics';
+import { keyVariantFor, play } from '../lib/audio';
+import { vibrateKey } from '../lib/haptics';
 import { dailyNumber, msUntilReset, utcDate } from '../lib/daily';
 import Decrypt from './Decrypt';
 import Icon from './Icon';
@@ -60,6 +62,15 @@ export default function Landing({ tier, hasSave, onStart, onContinue, onDaily, d
   const start = () => {
     trackStart();
     onStart();
+  };
+
+  const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.ctrlKey || e.metaKey) return;
+    const variant = keyVariantFor(e.key);
+    if (variant) {
+      play(variant);
+      vibrateKey();
+    }
   };
 
   // Typed tagline. Reduced motion shows it all at once.
@@ -168,6 +179,7 @@ export default function Landing({ tier, hasSave, onStart, onContinue, onDaily, d
               className="term-input"
               value={input}
               onChange={(e) => setInput(e.target.value)}
+              onKeyDown={onKeyDown}
               type="text"
               autoComplete="off"
               autoCorrect="off"

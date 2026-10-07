@@ -11,6 +11,7 @@ import type { MissionDef, Tier } from '../engine/types';
 import type { RunCommand } from '../engine/replay';
 import { MISSIONS } from '../missions';
 import { setAudioSettings, setMusicTrack, setTension, startMusic } from '../lib/audio';
+import { setHapticsEnabled } from '../lib/haptics';
 import { DEFAULT_SAVE, effectiveReduceMotion, loadSave, persistSave, type SaveData } from '../lib/save';
 import { campaignDone, factsFromWin, newlyUnlocked, type AchievementDef } from '../lib/achievements';
 import { dailyMission, dailyNumber, streakFor, utcDate } from '../lib/daily';
@@ -117,8 +118,20 @@ export default function GameApp() {
   }, [save.theme]);
 
   useEffect(() => {
-    setAudioSettings({ volume: save.volume, sfx: save.sfx, music: save.music, musicVolume: save.musicVolume, track: save.track });
-  }, [save.volume, save.sfx, save.music, save.musicVolume, save.track]);
+    setAudioSettings({
+      volume: save.volume,
+      sfx: save.sfx,
+      music: save.music,
+      musicVolume: save.musicVolume,
+      track: save.track,
+      keySounds: save.keySounds,
+      keySoundsVolume: save.keySoundsVolume,
+    });
+  }, [save.volume, save.sfx, save.music, save.musicVolume, save.track, save.keySounds, save.keySoundsVolume]);
+
+  useEffect(() => {
+    setHapticsEnabled(save.keyHaptics);
+  }, [save.keyHaptics]);
 
   // On phones, the visual viewport shrinks when the keyboard opens. Size the app to it so the prompt stays visible.
   useEffect(() => {

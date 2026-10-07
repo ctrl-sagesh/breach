@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { THEMES, isThemeUnlocked, type ThemeId } from '../lib/themes';
 import type { MotionSetting, SaveData, TypingSpeed } from '../lib/save';
 import { clearedOnAnyTier } from '../lib/progress';
@@ -11,6 +11,7 @@ import { TRACKS, TRACK_LABELS } from '../lib/music';
 import type { RestoreResult } from '../lib/cloud';
 import { buildFeedbackMailto } from '../lib/feedback';
 import { GAME_VERSION } from '../lib/version';
+import { hapticsSupported } from '../lib/haptics';
 
 interface SettingsProps {
   save: SaveData;
@@ -36,7 +37,12 @@ const MOTION: { id: MotionSetting; label: string }[] = [
 
 export default function Settings({ save, onChange, onReset, onBack, onRestored, onPrivacy, onAbout }: SettingsProps) {
   const [confirmReset, setConfirmReset] = useState(false);
+  const [canVibrate, setCanVibrate] = useState(false);
   const cleared = clearedOnAnyTier(save);
+
+  useEffect(() => {
+    setCanVibrate(hapticsSupported());
+  }, []);
 
   return (
     <Screen>
@@ -95,6 +101,40 @@ export default function Settings({ save, onChange, onReset, onBack, onRestored, 
             Music: {save.music ? 'on' : 'off'}
           </button>
         </div>
+      </section>
+
+      <section className="mb-8" aria-label="keyboard sound">
+        <h2 className="mb-3 flex items-center gap-2 text-sm tracking-widest text-[var(--dim)]">
+          <Icon name="terminal" size={16} />
+          KEYBOARD
+        </h2>
+        <label className="mb-4 block text-sm">
+          <span className="mb-2 flex justify-between">
+            <span>Typing sound volume</span>
+            <span className="tabular-nums">{Math.round(save.keySoundsVolume * 100)}%</span>
+          </span>
+          <input
+            type="range"
+            min={0}
+            max={100}
+            step={5}
+            value={Math.round(save.keySoundsVolume * 100)}
+            onChange={(e) => onChange({ keySoundsVolume: Number(e.target.value) / 100 })}
+            className="w-full accent-[var(--fg)]"
+            aria-label="keyboard sound volume"
+          />
+        </label>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <button type="button" className="btn" aria-pressed={save.keySounds} onClick={() => onChange({ keySounds: !save.keySounds })}>
+            Keyboard sounds: {save.keySounds ? 'on' : 'off'}
+          </button>
+          {canVibrate ? (
+            <button type="button" className="btn" aria-pressed={save.keyHaptics} onClick={() => onChange({ keyHaptics: !save.keyHaptics })}>
+              Keyboard haptics: {save.keyHaptics ? 'on' : 'off'}
+            </button>
+          ) : null}
+        </div>
+        <p className="mt-2 text-xs text-[var(--dim)]">A mechanical click per keystroke, separate from Effects. Haptics is a tiny buzz on devices that support it.</p>
       </section>
 
       <section className="mb-8">

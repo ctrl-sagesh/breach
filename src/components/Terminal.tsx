@@ -9,7 +9,8 @@ import { WORDLIST } from '../engine/commands/crypto';
 import { CANCEL_MARK } from '../engine/replay';
 import { Out, type GameSession } from '../engine/session';
 import type { Line } from '../engine/types';
-import { play } from '../lib/audio';
+import { keyVariantFor, play } from '../lib/audio';
+import { vibrateKey } from '../lib/haptics';
 import type { TypingSpeed } from '../lib/save';
 import QuickKeys from './QuickKeys';
 
@@ -261,7 +262,13 @@ export default function Terminal({ session, speed, onUpdate, onQuit, onFlash, on
       if (mode === 'shell') tab();
       return;
     }
-    if (e.key.length === 1 && !e.ctrlKey && !e.metaKey) play('key');
+    if (!e.ctrlKey && !e.metaKey) {
+      const variant = keyVariantFor(e.key);
+      if (variant) {
+        play(variant);
+        vibrateKey();
+      }
+    }
   };
 
   const onSubmit = (e: FormEvent) => {
