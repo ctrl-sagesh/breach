@@ -15,6 +15,8 @@ import ShareBar from './ShareBar';
 import type { RealWorldCard as Card } from '../lib/realworld';
 import type { ShareFacts } from '../lib/share';
 import type { Submission } from '../lib/leaderboard';
+import { buildFeedbackMailto } from '../lib/feedback';
+import { GAME_VERSION } from '../lib/version';
 
 interface DebriefProps {
   mission: MissionDef;
@@ -173,6 +175,11 @@ export default function Debrief({ mission, result, hintLimit, rankName, reduceMo
           Main menu
         </button>
       </div>
+      <p className="mt-3 text-center text-xs">
+        <a className="underline underline-offset-4 text-[var(--dim)] hover:text-[var(--fg)]" href={buildFeedbackMailto({ version: GAME_VERSION, tier: result.tier, mission: mission.codename })}>
+          Report a bug on this job
+        </a>
+      </p>
     </Screen>
   );
 }

@@ -7,6 +7,7 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { DIFFICULTY, TIERS } from '../engine/difficulty';
 import type { Line, Tier } from '../engine/types';
 import { landingReply, TAGLINE } from '../lib/landing';
+import { trackLandingView, trackStart } from '../lib/analytics';
 import { dailyNumber, msUntilReset, utcDate } from '../lib/daily';
 import Decrypt from './Decrypt';
 import Icon from './Icon';
@@ -24,6 +25,8 @@ interface LandingProps {
   muted: boolean;
   onToggleMute: () => void;
   onRestored: (restored: RestoreResult) => void;
+  onPrivacy: () => void;
+  onAbout: () => void;
   /** Fires once, on the first click or key. Browsers only allow audio after a gesture. */
   onFirstGesture: () => void;
 }
@@ -39,7 +42,7 @@ function countdownText(ms: number): string {
   return [Math.floor(total / 3600), Math.floor((total % 3600) / 60), total % 60].map((n) => String(n).padStart(2, '0')).join(':');
 }
 
-export default function Landing({ tier, hasSave, onStart, onContinue, onDaily, dailyStreak, muted, onToggleMute, onRestored, onFirstGesture }: LandingProps) {
+export default function Landing({ tier, hasSave, onStart, onContinue, onDaily, dailyStreak, muted, onToggleMute, onRestored, onPrivacy, onAbout, onFirstGesture }: LandingProps) {
   const [typed, setTyped] = useState(0);
   const [untilReset, setUntilReset] = useState(msUntilReset());
   useEffect(() => {
@@ -49,6 +52,15 @@ export default function Landing({ tier, hasSave, onStart, onContinue, onDaily, d
   const [log, setLog] = useState<Line[]>([]);
   const [input, setInput] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    trackLandingView();
+  }, []);
+
+  const start = () => {
+    trackStart();
+    onStart();
+  };
 
   // Typed tagline. Reduced motion shows it all at once.
   useEffect(() => {
@@ -98,7 +110,7 @@ export default function Landing({ tier, hasSave, onStart, onContinue, onDaily, d
     }
     const echo: Line = { text: `guest@breach:~$ ${raw.trim()}`, kind: 'echo' };
     setLog((prev) => [...prev, echo, ...reply.lines].slice(-LOG_LIMIT));
-    if (reply.action === 'start') onStart();
+    if (reply.action === 'start') start();
   };
 
   const visibleTagline = TAGLINE.slice(0, typed);
@@ -168,7 +180,7 @@ export default function Landing({ tier, hasSave, onStart, onContinue, onDaily, d
         </section>
 
         <div className="mb-6 flex flex-col items-center gap-3">
-          <button type="button" className="btn btn-start" onClick={onStart}>
+          <button type="button" className="btn btn-start" onClick={start}>
             <Icon name="play" size={18} />
             Start hacking
           </button>
@@ -213,6 +225,15 @@ export default function Landing({ tier, hasSave, onStart, onContinue, onDaily, d
             Today's job
           </button>
         </section>
+
+        <footer className="mt-6 flex justify-center gap-4 text-xs text-[var(--dim)]">
+          <button type="button" className="underline underline-offset-4 hover:text-[var(--fg)]" onClick={onPrivacy}>
+            Privacy
+          </button>
+          <button type="button" className="underline underline-offset-4 hover:text-[var(--fg)]" onClick={onAbout}>
+            About
+          </button>
+        </footer>
       </div>
     </main>
   );

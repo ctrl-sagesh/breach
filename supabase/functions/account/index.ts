@@ -4,9 +4,10 @@
 // Recovery keys are stored as a keyed hash (HMAC with a server-side pepper). Sync tokens are stored as a SHA-256 hash.
 // Restore and sync are rate limited through auth_attempts, and every save is checked for size before it is stored.
 
-import { admit, generateRecoveryKey, isWellFormedKey, mergeSaves, normalizeRecoveryKey, nicknameProblem, RESTORE_LIMIT } from '../_shared/engine.js';
+import { admit, corsHeaders, generateRecoveryKey, isWellFormedKey, mergeSaves, normalizeRecoveryKey, nicknameProblem, parseAllowedOrigins, RESTORE_LIMIT } from '../_shared/engine.js';
 
-const ALLOWED_ORIGIN = Deno.env.get('ALLOWED_ORIGIN') ?? '*';
+// Comma-separated list of exact origins or single-wildcard-subdomain patterns, e.g. 'https://a.test,https://*.b.test'.
+const ALLOWED_ORIGINS = parseAllowedOrigins(Deno.env.get('ALLOWED_ORIGINS') ?? '');
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? '';
 const SECRET_KEY = Deno.env.get('SUPABASE_SECRET_KEY') ?? Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
 const PEPPER = Deno.env.get('RECOVERY_PEPPER') ?? '';
@@ -16,17 +17,8 @@ const SYNC_LIMIT = { windowMs: 60 * 60 * 1000, max: 240 };
 const GLOBAL_RESTORE_LIMIT = { windowMs: 60 * 60 * 1000, max: 500 };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-const CORS = {
-  'access-control-allow-origin': ALLOWED_ORIGIN,
-  'access-control-allow-headers': 'content-type, apikey, authorization',
-  'access-control-allow-methods': 'POST, OPTIONS',
-};
-
 const enc = new TextEncoder();
 
-function json(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), { status, headers: { ...CORS, 'content-type': 'application/json' } });
-}
 
 function hex(buf: ArrayBuffer): string {
   return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
@@ -85,7 +77,10 @@ async function verifyToken(playerId: string, token: string) {
 }
 
 Deno.serve(async (req) => {
-  if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
+  // Computed per request: the allow-origin header echoes only the caller's origin, and only when it matches.
+  const cors = corsHeaders(req.headers.get('origin'), ALLOWED_ORIGINS);
+  const json = (body: unknown, status = 200): Response => new Response(JSON.stringify(body), { status, headers: { ...cors, 'content-type': 'application/json' } });
+  if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
   if (req.method !== 'POST') return json({ ok: false, reason: 'POST only' }, 405);
   if (!SUPABASE_URL || !SECRET_KEY || !PEPPER) return json({ ok: false, reason: 'server is not configured' }, 503);
 

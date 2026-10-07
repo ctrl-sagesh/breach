@@ -5,6 +5,7 @@
 
 import { useState } from 'react';
 import { renderShareCard, shareText, type ShareFacts } from '../lib/share';
+import { trackShareClicked } from '../lib/analytics';
 import Icon from './Icon';
 
 interface ShareBarProps {
@@ -20,6 +21,7 @@ export default function ShareBar({ facts, fileName }: ShareBarProps) {
   const [note, setNote] = useState<Note>(null);
 
   const download = async () => {
+    trackShareClicked('download');
     setBusy(true);
     try {
       const blob = await renderShareCard(facts);
@@ -40,6 +42,7 @@ export default function ShareBar({ facts, fileName }: ShareBarProps) {
   };
 
   const share = async () => {
+    trackShareClicked('share');
     setBusy(true);
     try {
       const blob = await renderShareCard(facts);
@@ -63,6 +66,7 @@ export default function ShareBar({ facts, fileName }: ShareBarProps) {
   };
 
   const copy = async () => {
+    trackShareClicked('copy');
     try {
       await navigator.clipboard.writeText(shareText(facts));
       setNote({ kind: 'ok', text: 'Copied to clipboard.' });

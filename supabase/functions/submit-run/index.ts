@@ -3,9 +3,10 @@
 // (bundled into engine.js by scripts/build-edge.mjs), and stores the score the replay produces.
 // Deno runtime. Deploy with: npx supabase functions deploy submit-run --no-verify-jwt
 
-import { MISSIONS, dailyMission, nicknameProblem, shiftDate, utcDate, validateRun } from '../_shared/engine.js';
+import { MISSIONS, corsHeaders, dailyMission, nicknameProblem, parseAllowedOrigins, shiftDate, utcDate, validateRun } from '../_shared/engine.js';
 
-const ALLOWED_ORIGIN = Deno.env.get('ALLOWED_ORIGIN') ?? '*';
+// Comma-separated list of exact origins or single-wildcard-subdomain patterns, e.g. 'https://a.test,https://*.b.test'.
+const ALLOWED_ORIGINS = parseAllowedOrigins(Deno.env.get('ALLOWED_ORIGINS') ?? '');
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? '';
 // The server-side key. The name depends on the project's key setup, so check the function secrets in the dashboard.
 const SECRET_KEY = Deno.env.get('SUPABASE_SECRET_KEY') ?? Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
@@ -14,16 +15,6 @@ const RATE_WINDOW_MS = 60 * 60 * 1000;
 const RATE_MAX_HITS = 60;
 const MAX_BODY_BYTES = 200_000;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-const CORS = {
-  'access-control-allow-origin': ALLOWED_ORIGIN,
-  'access-control-allow-headers': 'content-type, apikey, authorization',
-  'access-control-allow-methods': 'POST, OPTIONS',
-};
-
-function json(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), { status, headers: { ...CORS, 'content-type': 'application/json' } });
-}
 
 /** Calls the Supabase REST API with the server-side key. Used only for the tables browsers cannot write to. */
 async function rest(path: string, init: RequestInit = {}): Promise<Response> {
@@ -56,7 +47,10 @@ async function rateLimited(playerId: string): Promise<boolean> {
 }
 
 Deno.serve(async (req) => {
-  if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
+  // Computed per request: the allow-origin header echoes only the caller's origin, and only when it matches.
+  const cors = corsHeaders(req.headers.get('origin'), ALLOWED_ORIGINS);
+  const json = (body: unknown, status = 200): Response => new Response(JSON.stringify(body), { status, headers: { ...cors, 'content-type': 'application/json' } });
+  if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
   if (req.method !== 'POST') return json({ ok: false, reason: 'POST only' }, 405);
 
   const raw = await req.text();

@@ -1,5 +1,7 @@
 // Share cards: the text you copy, and the 1200x630 PNG drawn on a canvas. Pure text is tested directly; drawing needs a browser.
 
+import { SITE_URL } from './site';
+
 export interface ShareFacts {
   /** "JOB 03 · LIGHTHOUSE", "CAMPAIGN", or "DAILY 42". */
   label: string;
@@ -11,8 +13,6 @@ export interface ShareFacts {
   /** Extra line under the score, such as the ending or the completed count. */
   detail?: string;
 }
-
-export const SITE_URL = 'https://breach-opal.vercel.app';
 
 /** The text that goes on the clipboard, and in the native share sheet. */
 export function shareText(f: ShareFacts): string {

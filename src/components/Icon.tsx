@@ -25,7 +25,8 @@ export type IconName =
   | 'colour'
   | 'crt'
   | 'reset'
-  | 'transfer';
+  | 'transfer'
+  | 'mail';
 
 const PATHS: Record<Exclude<IconName, 'tier'>, ReactNode> = {
   terminal: (
@@ -147,6 +148,12 @@ const PATHS: Record<Exclude<IconName, 'tier'>, ReactNode> = {
       <line x1="4" y1="12" x2="19" y2="12" />
       <polyline points="14,7 19,12 14,17" />
       <line x1="4" y1="5" x2="4" y2="19" />
+    </>
+  ),
+  mail: (
+    <>
+      <rect x="3" y="5" width="18" height="14" rx="1.5" />
+      <polyline points="3.5,6 12,13 20.5,6" />
     </>
   ),
 };

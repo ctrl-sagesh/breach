@@ -5,6 +5,7 @@
 
 import { useState, type FormEvent } from 'react';
 import { cloudConfigured, registerAccount } from '../lib/cloud';
+import { trackHandleRegistered } from '../lib/analytics';
 import { getPlayerId } from '../lib/leaderboard';
 import { nicknameProblem } from '../lib/nickname';
 import type { SaveData } from '../lib/save';
@@ -40,6 +41,7 @@ export default function Register({ save, onRegistered, onDone, onSkip }: Registe
 
     if (!cloudConfigured()) {
       onRegistered({ nickname: handle, registerSkipped: false });
+      trackHandleRegistered(false);
       setStep({ name: 'key', recoveryKey: '', online: false });
       return;
     }
@@ -50,10 +52,12 @@ export default function Register({ save, onRegistered, onDone, onSkip }: Registe
       // Offline or refused: keep the handle on this device and say why. The key can be made later from Settings.
       setError(result.reason);
       onRegistered({ nickname: handle, playerId, registerSkipped: false });
+      trackHandleRegistered(false);
       setStep({ name: 'handle' });
       return;
     }
     onRegistered({ nickname: handle, playerId, recoveryKey: result.value.recoveryKey, syncToken: result.value.syncToken });
+    trackHandleRegistered(true);
     setStep({ name: 'key', recoveryKey: result.value.recoveryKey, online: true });
   };
 

@@ -16,9 +16,12 @@ Run `npm test` and `npm run build` before calling a change done.
 Strict layers. Dependencies only point downward.
 
 ```
-src/app/            Next shell (layout, page, globals.css with palettes and CRT effects)
+src/app/            Next shell (layout, page, globals.css with palettes and CRT effects, robots.ts/sitemap.ts,
+                    error.tsx + global-error.tsx as last-resort crash screens)
 src/components/     React UI. Reads session state, never mutates game rules.
-src/lib/            save (localStorage), audio (Web Audio), themes, progress (summary, unlocks, share card)
+src/lib/            save (localStorage), audio (Web Audio), themes, progress (summary, unlocks, share card),
+                    site (the one SITE_URL), analytics (Vercel event wrapper), origins (CORS allow-list matching,
+                    shared with the Edge Functions), feedback (mailto builder), version
 src/engine/         Pure game logic. No React, no DOM, no storage. Runs under Node in tests.
   types.ts          MachineDef, MissionDef, Line, SoundEvent, ... (the data contract)
   session.ts        GameSession: one attempt at one mission. Trace, prompts, pivoting, flag, endings, completion.

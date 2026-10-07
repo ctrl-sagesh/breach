@@ -15,6 +15,7 @@ import { DEFAULT_SAVE, effectiveReduceMotion, loadSave, persistSave, type SaveDa
 import { campaignDone, factsFromWin, newlyUnlocked, type AchievementDef } from '../lib/achievements';
 import { dailyMission, dailyNumber, streakFor, utcDate } from '../lib/daily';
 import { realWorldFor } from '../lib/realworld';
+import { trackDailyPlayed, trackMissionCleared, trackMissionStarted, trackMissionTraced, trackRestoreUsed } from '../lib/analytics';
 import { buildSubmission, getPlayerId, type Submission } from '../lib/leaderboard';
 import { debounce, syncSave, type RestoreResult } from '../lib/cloud';
 import { addAttempt, type AttemptRecord, type Outcome } from '../lib/history';
@@ -32,7 +33,9 @@ import Landing from './Landing';
 import MainMenu from './MainMenu';
 import MissionScreen from './MissionScreen';
 import MissionSelect from './MissionSelect';
+import About from './About';
 import OpsLog from './OpsLog';
+import Privacy from './Privacy';
 import Profile from './Profile';
 import Register from './Register';
 import Settings from './Settings';
@@ -51,6 +54,9 @@ type Screen =
   | { name: 'achievements' }
   | { name: 'history' }
   | { name: 'profile' }
+  /** Reachable from the landing page (before a handle exists) and from Settings, so Back needs to know which. */
+  | { name: 'privacy'; from: 'landing' | 'settings' }
+  | { name: 'about'; from: 'landing' | 'settings' }
   | { name: 'briefing'; index: number }
   /** `date` is set for the daily job, which is generated from the date rather than taken from the list. */
   | { name: 'play'; index: number; date?: string }
@@ -194,6 +200,7 @@ export default function GameApp() {
 
   /** A restore brings the account's identity and the cloud copy onto this device. Device settings stay. */
   const adoptRestored = (r: RestoreResult) => {
+    trackRestoreUsed();
     fromSync.current = false;
     setSave((prev) => {
       const base: SaveData = { ...prev, playerId: r.playerId, nickname: r.nickname, syncToken: r.syncToken, recoveryKey: undefined, registerSkipped: false };
@@ -259,6 +266,7 @@ export default function GameApp() {
       return next;
     });
     openSession(mission, save.tier);
+    trackMissionStarted(save.tier, 'campaign');
     setScreen({ name: 'play', index });
   };
 
@@ -279,6 +287,8 @@ export default function GameApp() {
       return next;
     });
     openSession(mission, save.tier);
+    trackMissionStarted(save.tier, 'daily');
+    trackDailyPlayed(save.tier);
     setScreen({ name: 'play', index: -1, date });
   };
 
@@ -301,6 +311,7 @@ export default function GameApp() {
     const now = new Date();
     const today = utcDate(now);
     const isDaily = Boolean(date);
+    trackMissionCleared(s.tier, isDaily ? 'daily' : 'campaign');
 
     // Next save state, computed once so achievements and the ops log read the same numbers that get saved.
     const tierResults = save.completed[s.tier];
@@ -351,7 +362,9 @@ export default function GameApp() {
   };
 
   const onFailed = (index: number, s: GameSession, date?: string) => {
-    logAttempt(s, missionFor(index, date), date, s.failReason === 'time' ? 'timed-out' : 'traced');
+    const outcome = s.failReason === 'time' ? 'timed-out' : 'traced';
+    if (outcome === 'traced') trackMissionTraced(s.tier, date ? 'daily' : 'campaign');
+    logAttempt(s, missionFor(index, date), date, outcome);
   };
 
   const onTransferDone = useCallback(() => {
@@ -423,6 +436,8 @@ export default function GameApp() {
           onStart={() => setScreen(!save.nickname && !save.registerSkipped ? { name: 'register' } : { name: 'menu' })}
           onContinue={() => setScreen({ name: 'select' })}
           onDaily={toDaily}
+          onPrivacy={() => setScreen({ name: 'privacy', from: 'landing' })}
+          onAbout={() => setScreen({ name: 'about', from: 'landing' })}
           onFirstGesture={onFirstGesture}
         />
       );
@@ -476,7 +491,23 @@ export default function GameApp() {
       body = <Profile save={save} onBack={toMenu} />;
       break;
     case 'settings':
-      body = <Settings save={save} onChange={update} onReset={resetProgress} onBack={toMenu} onRestored={adoptRestored} />;
+      body = (
+        <Settings
+          save={save}
+          onChange={update}
+          onReset={resetProgress}
+          onBack={toMenu}
+          onRestored={adoptRestored}
+          onPrivacy={() => setScreen({ name: 'privacy', from: 'settings' })}
+          onAbout={() => setScreen({ name: 'about', from: 'settings' })}
+        />
+      );
+      break;
+    case 'privacy':
+      body = <Privacy onBack={() => setScreen(screen.from === 'landing' ? { name: 'landing' } : { name: 'settings' })} />;
+      break;
+    case 'about':
+      body = <About onBack={() => setScreen(screen.from === 'landing' ? { name: 'landing' } : { name: 'settings' })} />;
       break;
     case 'card':
       body = <EndScreen save={save} onMenu={toMenu} />;

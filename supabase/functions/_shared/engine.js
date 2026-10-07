@@ -3495,17 +3495,45 @@ function mergeSaves(local, remote) {
     nickname: local.nickname ?? remote.nickname
   };
 }
+
+// src/lib/origins.ts
+var WILDCARD_LABEL = "[a-zA-Z0-9-]+";
+function escapeRegExp2(text) {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+function patternToRegExp(pattern) {
+  const parts = pattern.split("*").map(escapeRegExp2);
+  return new RegExp(`^${parts.join(WILDCARD_LABEL)}$`);
+}
+function parseAllowedOrigins(csv) {
+  return csv.split(",").map((s) => s.trim()).filter(Boolean);
+}
+function originAllowed(origin, allowed) {
+  if (!origin) return false;
+  return allowed.some((pattern) => patternToRegExp(pattern).test(origin));
+}
+function corsHeaders(origin, allowed) {
+  const headers = {
+    "access-control-allow-headers": "content-type, apikey, authorization",
+    "access-control-allow-methods": "POST, OPTIONS",
+    vary: "Origin"
+  };
+  if (originAllowed(origin, allowed)) headers["access-control-allow-origin"] = origin;
+  return headers;
+}
 export {
   MISSIONS,
   RESTORE_LIMIT,
   RUN_LIMITS,
   admit,
+  corsHeaders,
   dailyMission,
   generateRecoveryKey,
   isWellFormedKey,
   mergeSaves,
   nicknameProblem,
   normalizeRecoveryKey,
+  parseAllowedOrigins,
   shiftDate,
   utcDate,
   validateRun

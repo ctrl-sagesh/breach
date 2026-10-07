@@ -9,6 +9,8 @@ import { Header, Screen } from './ui';
 import AccountPanel from './AccountPanel';
 import { TRACKS, TRACK_LABELS } from '../lib/music';
 import type { RestoreResult } from '../lib/cloud';
+import { buildFeedbackMailto } from '../lib/feedback';
+import { GAME_VERSION } from '../lib/version';
 
 interface SettingsProps {
   save: SaveData;
@@ -16,6 +18,8 @@ interface SettingsProps {
   onReset: () => void;
   onBack: () => void;
   onRestored: (restored: RestoreResult) => void;
+  onPrivacy: () => void;
+  onAbout: () => void;
 }
 
 const SPEEDS: { id: TypingSpeed; label: string }[] = [
@@ -30,7 +34,7 @@ const MOTION: { id: MotionSetting; label: string }[] = [
   { id: 'reduce', label: 'Reduced' },
 ];
 
-export default function Settings({ save, onChange, onReset, onBack, onRestored }: SettingsProps) {
+export default function Settings({ save, onChange, onReset, onBack, onRestored, onPrivacy, onAbout }: SettingsProps) {
   const [confirmReset, setConfirmReset] = useState(false);
   const cleared = clearedOnAnyTier(save);
 
@@ -158,6 +162,27 @@ export default function Settings({ save, onChange, onReset, onBack, onRestored }
       </section>
 
       <AccountPanel save={save} onChange={onChange} onRestored={onRestored} />
+
+      <section className="mb-8" aria-label="support">
+        <h2 className="mb-3 flex items-center gap-2 text-sm tracking-widest text-[var(--dim)]">
+          <Icon name="help" size={16} />
+          SUPPORT
+        </h2>
+        <div className="grid gap-3 sm:grid-cols-3">
+          <a className="btn flex items-center justify-center gap-2 text-sm" href={buildFeedbackMailto({ version: GAME_VERSION, tier: save.tier })}>
+            <Icon name="mail" size={16} />
+            Report bug / feedback
+          </a>
+          <button type="button" className="btn flex items-center justify-center gap-2 text-sm" onClick={onPrivacy}>
+            <Icon name="lock" size={16} />
+            Privacy
+          </button>
+          <button type="button" className="btn flex items-center justify-center gap-2 text-sm" onClick={onAbout}>
+            <Icon name="help" size={16} />
+            About
+          </button>
+        </div>
+      </section>
 
       <section className="mt-auto space-y-3 pt-8">
         <button

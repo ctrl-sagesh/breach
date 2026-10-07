@@ -1,12 +1,26 @@
 import type { Metadata, Viewport } from 'next';
+import { Analytics } from '@vercel/analytics/next';
+import { SITE_URL } from '../lib/site';
 import './globals.css';
 
 const TITLE = 'BREACH: a hacking terminal game';
 const DESCRIPTION =
   'Take freelance jobs from anonymous clients, breach fake networks with real tools, and mind your trace. A browser terminal game that teaches real security ideas.';
 
-// Social cards need absolute URLs. Set NEXT_PUBLIC_SITE_URL to the deployed address when building.
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'http://localhost:3000';
+// Structured data for a browser game. See https://schema.org/VideoGame.
+const STRUCTURED_DATA = {
+  '@context': 'https://schema.org',
+  '@type': 'VideoGame',
+  name: 'BREACH',
+  description: DESCRIPTION,
+  url: SITE_URL,
+  image: `${SITE_URL}/og.png`,
+  genre: ['Puzzle', 'Simulation', 'Educational'],
+  applicationCategory: 'Game',
+  operatingSystem: 'Any',
+  playMode: 'SinglePlayer',
+  offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
+};
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
@@ -38,7 +52,12 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" data-theme="green">
-      <body>{children}</body>
+      <body>
+        {children}
+        <Analytics />
+        {/* eslint-disable-next-line react/no-danger */}
+        <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(STRUCTURED_DATA) }} />
+      </body>
     </html>
   );
 }
