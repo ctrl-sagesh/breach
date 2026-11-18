@@ -71,6 +71,8 @@ export interface Completion {
 export interface SessionOptions {
   now?: () => number;
   tier?: Tier;
+  /** Quick-start path: print a short mission briefing in the terminal instead of a separate briefing screen. */
+  quickBriefing?: boolean;
 }
 
 const TRACE_LIMIT = 100;
@@ -110,11 +112,17 @@ export class GameSession {
   private readonly now: () => number;
   private readonly startedAt: number;
   private endedAt: number | null = null;
+  private readonly quickBriefing: boolean;
 
   constructor(baseMission: MissionDef, options: SessionOptions = {}) {
     this.tier = options.tier ?? 'medium';
-    this.config = DIFFICULTY[this.tier];
+    const base = DIFFICULTY[this.tier];
+    // Hard Friday: no hints, and trace runs at least as fast as hard tier, whatever tier was picked.
+    this.config = baseMission.hardFriday
+      ? { ...base, hintLimit: 0, traceMultiplier: Math.max(base.traceMultiplier, DIFFICULTY.hard.traceMultiplier) }
+      : base;
     this.baseMission = baseMission;
+    this.quickBriefing = options.quickBriefing ?? false;
     const mission = applyTier(baseMission, this.tier);
     this.mission = mission;
     this.secrets = this.config.autoClues ? buildSecrets(mission) : [];
@@ -174,9 +182,16 @@ export class GameSession {
   }
 
   intro(): Line[] {
+    const open: Line = { text: `${this.machine.hostname} :: session open as ${this.frame.user}`, kind: 'sys' };
+    const help: Line = { text: "Type 'help' for commands. Every noisy action raises your trace.", kind: 'dim' };
+    if (!this.quickBriefing) return [open, help];
+    const scenario = this.mission.briefing.find((l) => typeof l === 'string') ?? this.mission.briefing[0];
+    const scenarioText = typeof scenario === 'string' ? scenario : scenario.text;
     return [
-      { text: `${this.machine.hostname} :: session open as ${this.frame.user}`, kind: 'sys' },
-      { text: "Type 'help' for commands. Every noisy action raises your trace.", kind: 'dim' },
+      { text: `JOB ${String(this.mission.number).padStart(2, '0')} :: ${this.mission.codename} :: CLIENT ${this.mission.client}`, kind: 'title' },
+      { text: scenarioText, kind: 'out' },
+      open,
+      help,
     ];
   }
 

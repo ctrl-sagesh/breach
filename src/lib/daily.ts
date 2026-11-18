@@ -33,6 +33,11 @@ export function msUntilReset(now: Date = new Date()): number {
   return next - now.getTime();
 }
 
+/** Hard Friday: every Friday (UTC), the daily is the harder variant. */
+export function isHardFriday(date: string): boolean {
+  return new Date(`${date}T00:00:00Z`).getUTCDay() === 5;
+}
+
 /** Consecutive days with a completed daily, counting back from today (or yesterday, so a streak survives until the day is over). */
 export function streakFor(completedDates: readonly string[], today: string): number {
   const done = new Set(completedDates);
@@ -101,6 +106,7 @@ export const REAL_WORLD_KEYS = ['shared-note', 'encoded-secret', 'weak-hash'] as
 
 /** The job for one UTC date. Pure: the same date always returns the same mission. */
 export function dailyMission(date: string): MissionDef {
+  const hardFriday = isHardFriday(date);
   const rand = seededRandom(hashSeed(`breach-daily:${date}`));
   const ip = targetIp(rand);
   const host = pick(rand, HOSTS);
@@ -112,7 +118,7 @@ export function dailyMission(date: string): MissionDef {
   const flagPath = `${home}/flag.txt`;
 
   const files: Record<string, FileDef> = {};
-  const decoyPaths = Object.keys(DECOYS).filter(() => rand() < 0.6);
+  const decoyPaths = hardFriday ? Object.keys(DECOYS) : Object.keys(DECOYS).filter(() => rand() < 0.6);
   for (const p of decoyPaths) files[p] = { content: DECOYS[p] };
 
   let solution: string[];
@@ -178,12 +184,13 @@ export function dailyMission(date: string): MissionDef {
   return {
     id: `daily-${date}`,
     number: dayNo,
-    codename: `DAILY ${dayNo}`,
+    codename: hardFriday ? `DAILY ${dayNo} :: HARD FRIDAY` : `DAILY ${dayNo}`,
     title: `${host}: ${concept}`,
     client: 'OPEN BOARD',
     briefing: [
       `Today's job is open to everyone, on the same network, the same day. Target: ${host} (${ip}).`,
       `Find the account, get in, read the flag at ${flagPath}.`,
+      ...(hardFriday ? ['Hard Friday: trace runs fast and hints are off, on every difficulty.'] : []),
     ],
     debrief: [
       `The weak point was ${concept}. It is one of the oldest mistakes in the book, and it still shows up in the field.`,
@@ -201,6 +208,7 @@ export function dailyMission(date: string): MissionDef {
     solution,
     kaliSolution,
     realWorldKey: REAL_WORLD_KEYS[template],
+    hardFriday,
   };
 }
 

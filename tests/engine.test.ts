@@ -8,7 +8,7 @@ import { runLoginQuery, tokenize, type LoginRow } from '../src/engine/sql';
 import { rankFor, scoreMission, type MissionResult } from '../src/engine/scoring';
 import { DEFAULT_SAVE, loadSave, type SaveData } from '../src/lib/save';
 import { clearedOnAnyTier, missionUnlocked, summarize } from '../src/lib/progress';
-import { applyTier, pointsFor } from '../src/engine/difficulty';
+import { applyTier, DIFFICULTY, pointsFor } from '../src/engine/difficulty';
 import { MISSIONS } from '../src/missions';
 import type { MachineDef, Tier } from '../src/engine/types';
 
@@ -21,6 +21,39 @@ const TEMPLATE = "SELECT id, username FROM users WHERE username = '{username}' A
 function result(score: number, tier: Tier = 'medium'): MissionResult {
   return { score, points: score, tier, seconds: 0, trace: 0, hints: 0 };
 }
+
+describe('quick-start briefing', () => {
+  it('intro() is generic without quickBriefing', () => {
+    const s = new GameSession(MISSIONS[0], { tier: 'easy' });
+    const lines = s.intro().map((l) => l.text);
+    expect(lines.some((t) => t.includes(MISSIONS[0].codename))).toBe(false);
+  });
+
+  it('intro() prints the job and its opening scenario line when quickBriefing is set', () => {
+    const s = new GameSession(MISSIONS[0], { tier: 'easy', quickBriefing: true });
+    const lines = s.intro().map((l) => l.text);
+    expect(lines[0]).toContain(MISSIONS[0].codename);
+    expect(lines[0]).toContain(MISSIONS[0].client);
+    const scenario = typeof MISSIONS[0].briefing[0] === 'string' ? MISSIONS[0].briefing[0] : (MISSIONS[0].briefing[0] as { text: string }).text;
+    expect(lines).toContain(scenario);
+  });
+});
+
+describe('Hard Friday', () => {
+  it('forces no hints and at least hard-tier trace speed, on every tier', () => {
+    const friday = { ...MISSIONS[0], hardFriday: true };
+    for (const tier of ['easy', 'medium', 'hard'] as Tier[]) {
+      const s = new GameSession(friday, { tier });
+      expect(s.hintLimit).toBe(0);
+      expect(s.config.traceMultiplier).toBeGreaterThanOrEqual(DIFFICULTY.hard.traceMultiplier);
+    }
+  });
+
+  it('leaves an ordinary day alone', () => {
+    const s = new GameSession(MISSIONS[0], { tier: 'easy' });
+    expect(s.hintLimit).toBe(3);
+  });
+});
 
 describe('SQL login form', () => {
   it('accepts the right password', () => {

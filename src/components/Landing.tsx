@@ -10,7 +10,7 @@ import { landingReply, TAGLINE } from '../lib/landing';
 import { trackLandingView, trackStart } from '../lib/analytics';
 import { keyVariantFor, play } from '../lib/audio';
 import { vibrateKey } from '../lib/haptics';
-import { dailyNumber, msUntilReset, utcDate } from '../lib/daily';
+import { dailyNumber, isHardFriday, msUntilReset, utcDate } from '../lib/daily';
 import Decrypt from './Decrypt';
 import Icon from './Icon';
 import RestoreInline from './RestoreInline';
@@ -191,9 +191,27 @@ export default function Landing({ tier, hasSave, onStart, onContinue, onDaily, d
           </form>
         </section>
 
-        <div className="mb-6 flex flex-col items-center gap-3">
-          <button type="button" className="btn btn-start" onClick={start}>
+        <section className="panel mb-6 flex flex-col items-center gap-3 border-[var(--fg)] p-5 text-center" aria-label="daily challenge">
+          <Icon name="calendar" size={28} />
+          <p className="tracking-[0.3em] text-[var(--dim)]">
+            TODAY&apos;S JOB · DAILY {dailyNumber(utcDate())}
+            {isHardFriday(utcDate()) ? <span className="ml-2 text-[var(--alert)]">⚠ HARD FRIDAY</span> : null}
+          </p>
+          <p className="text-sm">
+            One shared job, everyone, every day. Next job in <span className="glow tabular-nums">{countdownText(untilReset)}</span>
+            {dailyStreak > 0 ? <> · streak {dailyStreak} day{dailyStreak === 1 ? '' : 's'}</> : null}
+          </p>
+          <button type="button" className="btn btn-start" onClick={onDaily}>
             <Icon name="play" size={18} />
+            Play today's job
+          </button>
+          <p className="text-xs text-[var(--dim)]">Under 5 minutes. Share your result when you&apos;re done.</p>
+        </section>
+
+        <div className="mb-6 flex flex-col items-center gap-3">
+          <p className="text-xs tracking-[0.3em] text-[var(--dim)]">OR PLAY THE 8-JOB CAMPAIGN</p>
+          <button type="button" className="btn flex items-center gap-2" onClick={start}>
+            <Icon name="play" size={16} />
             Start hacking
           </button>
           {hasSave ? (
@@ -221,21 +239,6 @@ export default function Landing({ tier, hasSave, onStart, onContinue, onDaily, d
               </div>
             ))}
           </div>
-        </section>
-
-        <section className="panel flex flex-wrap items-center gap-3 p-3 text-xs" aria-label="daily challenge">
-          <Icon name="calendar" size={24} />
-          <div className="min-w-[10rem] flex-1">
-            <p className="tracking-widest text-[var(--dim)]">DAILY {dailyNumber(utcDate())}</p>
-            <p>
-              Next job in <span className="glow tabular-nums">{countdownText(untilReset)}</span>
-              {dailyStreak > 0 ? <> · streak {dailyStreak} day{dailyStreak === 1 ? '' : 's'}</> : null}
-            </p>
-          </div>
-          <button type="button" className="btn flex items-center gap-2 !min-h-[36px] text-xs" onClick={onDaily}>
-            <Icon name="play" size={14} />
-            Today's job
-          </button>
         </section>
 
         <footer className="mt-6 flex justify-center gap-4 text-xs text-[var(--dim)]">

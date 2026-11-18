@@ -1371,8 +1371,10 @@ var GameSession = class {
     this.warningsGiven = 0;
     this.endedAt = null;
     this.tier = options.tier ?? "medium";
-    this.config = DIFFICULTY[this.tier];
+    const base = DIFFICULTY[this.tier];
+    this.config = baseMission.hardFriday ? { ...base, hintLimit: 0, traceMultiplier: Math.max(base.traceMultiplier, DIFFICULTY.hard.traceMultiplier) } : base;
     this.baseMission = baseMission;
+    this.quickBriefing = options.quickBriefing ?? false;
     const mission9 = applyTier(baseMission, this.tier);
     this.mission = mission9;
     this.secrets = this.config.autoClues ? buildSecrets(mission9) : [];
@@ -1418,9 +1420,16 @@ var GameSession = class {
     return Math.max(0, Math.floor(((this.endedAt ?? this.now()) - this.startedAt) / 1e3));
   }
   intro() {
+    const open = { text: `${this.machine.hostname} :: session open as ${this.frame.user}`, kind: "sys" };
+    const help = { text: "Type 'help' for commands. Every noisy action raises your trace.", kind: "dim" };
+    if (!this.quickBriefing) return [open, help];
+    const scenario = this.mission.briefing.find((l) => typeof l === "string") ?? this.mission.briefing[0];
+    const scenarioText = typeof scenario === "string" ? scenario : scenario.text;
     return [
-      { text: `${this.machine.hostname} :: session open as ${this.frame.user}`, kind: "sys" },
-      { text: "Type 'help' for commands. Every noisy action raises your trace.", kind: "dim" }
+      { text: `JOB ${String(this.mission.number).padStart(2, "0")} :: ${this.mission.codename} :: CLIENT ${this.mission.client}`, kind: "title" },
+      { text: scenarioText, kind: "out" },
+      open,
+      help
     ];
   }
   inputMode() {
@@ -3187,6 +3196,9 @@ function dailyNumber(date) {
   const day = Date.parse(`${date}T00:00:00Z`);
   return Math.floor((day - start) / 864e5) + 1;
 }
+function isHardFriday(date) {
+  return (/* @__PURE__ */ new Date(`${date}T00:00:00Z`)).getUTCDay() === 5;
+}
 function hashSeed(text) {
   let h = 2166136261;
   for (let i = 0; i < text.length; i++) {
@@ -3231,6 +3243,7 @@ function targetIp(rand) {
 }
 var REAL_WORLD_KEYS = ["shared-note", "encoded-secret", "weak-hash"];
 function dailyMission(date) {
+  const hardFriday = isHardFriday(date);
   const rand = seededRandom(hashSeed(`breach-daily:${date}`));
   const ip = targetIp(rand);
   const host = pick(rand, HOSTS);
@@ -3241,7 +3254,7 @@ function dailyMission(date) {
   const home = `/home/${user}`;
   const flagPath = `${home}/flag.txt`;
   const files = {};
-  const decoyPaths = Object.keys(DECOYS).filter(() => rand() < 0.6);
+  const decoyPaths = hardFriday ? Object.keys(DECOYS) : Object.keys(DECOYS).filter(() => rand() < 0.6);
   for (const p of decoyPaths) files[p] = { content: DECOYS[p] };
   let solution;
   let kaliSolution;
@@ -3300,12 +3313,13 @@ guest:${hex(rand, 32)}:user` };
   return {
     id: `daily-${date}`,
     number: dayNo,
-    codename: `DAILY ${dayNo}`,
+    codename: hardFriday ? `DAILY ${dayNo} :: HARD FRIDAY` : `DAILY ${dayNo}`,
     title: `${host}: ${concept}`,
     client: "OPEN BOARD",
     briefing: [
       `Today's job is open to everyone, on the same network, the same day. Target: ${host} (${ip}).`,
-      `Find the account, get in, read the flag at ${flagPath}.`
+      `Find the account, get in, read the flag at ${flagPath}.`,
+      ...hardFriday ? ["Hard Friday: trace runs fast and hints are off, on every difficulty."] : []
     ],
     debrief: [
       `The weak point was ${concept}. It is one of the oldest mistakes in the book, and it still shows up in the field.`
@@ -3322,7 +3336,8 @@ guest:${hex(rand, 32)}:user` };
     ],
     solution,
     kaliSolution,
-    realWorldKey: REAL_WORLD_KEYS[template]
+    realWorldKey: REAL_WORLD_KEYS[template],
+    hardFriday
   };
 }
 

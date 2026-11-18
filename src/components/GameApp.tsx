@@ -14,7 +14,7 @@ import { setAudioSettings, setMusicTrack, setTension, startMusic } from '../lib/
 import { setHapticsEnabled } from '../lib/haptics';
 import { DEFAULT_SAVE, effectiveReduceMotion, loadSave, persistSave, type SaveData } from '../lib/save';
 import { campaignDone, factsFromWin, newlyUnlocked, type AchievementDef } from '../lib/achievements';
-import { dailyMission, dailyNumber, streakFor, utcDate } from '../lib/daily';
+import { dailyMission, dailyNumber, isHardFriday, streakFor, utcDate } from '../lib/daily';
 import { realWorldFor } from '../lib/realworld';
 import { trackDailyPlayed, trackMissionCleared, trackMissionStarted, trackMissionTraced, trackRestoreUsed } from '../lib/analytics';
 import { buildSubmission, getPlayerId, type Submission } from '../lib/leaderboard';
@@ -22,7 +22,7 @@ import { debounce, syncSave, type RestoreResult } from '../lib/cloud';
 import { addAttempt, type AttemptRecord, type Outcome } from '../lib/history';
 import { mergeSaves } from '../lib/merge';
 import { summarize } from '../lib/progress';
-import type { ShareFacts } from '../lib/share';
+import type { DailyStats, ShareFacts } from '../lib/share';
 import Achievements, { AchievementToast } from './Achievements';
 import Boot from './Boot';
 import BoardScreen from './BoardScreen';
@@ -86,6 +86,17 @@ function newAttemptId(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
+/** True for a visitor who has never started or finished anything — the one who gets the quick-start path and skips the boot sequence. */
+function isFreshVisitor(s: SaveData): boolean {
+  return (
+    !s.nickname &&
+    !s.registerSkipped &&
+    s.history.length === 0 &&
+    Object.values(s.completed).every((t) => Object.keys(t).length === 0) &&
+    Object.values(s.attempts).every((t) => Object.keys(t).length === 0)
+  );
+}
+
 export default function GameApp() {
   const [save, setSave] = useState<SaveData>(DEFAULT_SAVE);
   const [screen, setScreen] = useState<Screen>({ name: 'boot' });
@@ -96,7 +107,10 @@ export default function GameApp() {
   const [systemReduce, setSystemReduce] = useState(false);
   const [toast, setToast] = useState<AchievementDef[]>([]);
   const [lastRun, setLastRun] = useState<LastRun | null>(null);
+  const [afterRegister, setAfterRegister] = useState<Screen | null>(null);
   const lastScreen = useRef<Screen['name']>('boot');
+  /** Set on the first-ever win, when there is no handle yet, so the next debrief exit detours through Register. */
+  const firstWinRegister = useRef(false);
   /** The attempt's command log, timed from the moment the session opened. Replayed by the server and the viewer. */
   const run = useRef<{ startedAt: number; commands: RunCommand[]; recorded: boolean }>({ startedAt: 0, commands: [], recorded: false });
   /** Set when a save change came from a sync merge, so the change does not send another sync. */
@@ -106,6 +120,8 @@ export default function GameApp() {
   useEffect(() => {
     const loaded = loadSave();
     setSave(loaded);
+    // A returning player has already seen the boot sequence. Go straight to the landing page.
+    if (!isFreshVisitor(loaded)) setScreen({ name: 'landing' });
     const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
     setSystemReduce(mq.matches);
     const onChange = () => setSystemReduce(mq.matches);
@@ -233,12 +249,41 @@ export default function GameApp() {
     });
   };
 
-  const openSession = (mission: MissionDef, sessionTier: Tier) => {
+  const openSession = (mission: MissionDef, sessionTier: Tier, opts?: { quickBriefing?: boolean }) => {
     run.current = { startedAt: Date.now(), commands: [], recorded: false };
-    const s = new GameSession(mission, { tier: sessionTier });
+    const s = new GameSession(mission, { tier: sessionTier, quickBriefing: opts?.quickBriefing });
     setSession(s);
     setAttemptKey((k) => k + 1);
     return s;
+  };
+
+  /** "Start hacking" for a visitor who has never played: straight into job 1 on Easy, briefing printed in the terminal. */
+  const quickStartFirstMission = () => {
+    flushSudo(session);
+    const mission = MISSIONS[0];
+    setSave((prev) => {
+      const next: SaveData = {
+        ...prev,
+        tier: 'easy',
+        attempts: { ...prev.attempts, easy: { ...prev.attempts.easy, [mission.id]: (prev.attempts.easy[mission.id] ?? 0) + 1 } },
+      };
+      persistSave(next);
+      return next;
+    });
+    openSession(mission, 'easy', { quickBriefing: true });
+    trackMissionStarted('easy', 'campaign');
+    setScreen({ name: 'play', index: 0 });
+  };
+
+  /** Where a debrief exit goes, unless this was the first-ever win, which detours through Register first. */
+  const continueAfter = (target: Screen) => {
+    if (firstWinRegister.current) {
+      firstWinRegister.current = false;
+      setAfterRegister(target);
+      setScreen({ name: 'register' });
+      return;
+    }
+    setScreen(target);
   };
 
   /** An attempt that ended without a win (trace, clock or abort) goes into the ops log once. */
@@ -325,6 +370,10 @@ export default function GameApp() {
     const today = utcDate(now);
     const isDaily = Boolean(date);
     trackMissionCleared(s.tier, isDaily ? 'daily' : 'campaign');
+
+    // First win ever, no handle yet: nudge registration once the debrief is done, instead of blocking play with it up front.
+    const everCompleted = Object.values(save.completed).some((t) => Object.keys(t).length > 0);
+    if (!save.nickname && !save.registerSkipped && !everCompleted) firstWinRegister.current = true;
 
     // Next save state, computed once so achievements and the ops log read the same numbers that get saved.
     const tierResults = save.completed[s.tier];
@@ -446,7 +495,13 @@ export default function GameApp() {
           muted={muted}
           onToggleMute={toggleMute}
           onRestored={adoptRestored}
-          onStart={() => setScreen(!save.nickname && !save.registerSkipped ? { name: 'register' } : { name: 'menu' })}
+          onStart={() => {
+            if (isFreshVisitor(save)) {
+              quickStartFirstMission();
+              return;
+            }
+            setScreen(!save.nickname && !save.registerSkipped ? { name: 'register' } : { name: 'menu' });
+          }}
           onContinue={() => setScreen({ name: 'select' })}
           onDaily={toDaily}
           onPrivacy={() => setScreen({ name: 'privacy', from: 'landing' })}
@@ -455,19 +510,26 @@ export default function GameApp() {
         />
       );
       break;
-    case 'register':
+    case 'register': {
+      const leaveRegister = () => {
+        const target = afterRegister ?? { name: 'menu' as const };
+        setAfterRegister(null);
+        setScreen(target);
+      };
       body = (
         <Register
           save={save}
+          celebratory={afterRegister !== null}
           onRegistered={(patch) => update(patch)}
-          onDone={toMenu}
+          onDone={leaveRegister}
           onSkip={() => {
             update({ registerSkipped: true });
-            toMenu();
+            leaveRegister();
           }}
         />
       );
       break;
+    }
     case 'menu':
       body = (
         <MainMenu
@@ -575,6 +637,15 @@ export default function GameApp() {
       const share: ShareFacts = date
         ? { label: `DAILY ${dailyNumber(date)}`, tier: DIFFICULTY[result.tier].label, rank, score: result.points, streak: streakFor(doneDates, date) }
         : { label: `JOB ${String(mission.number).padStart(2, '0')} · ${mission.codename}`, tier: DIFFICULTY[result.tier].label, rank, score: result.points };
+      const daily: DailyStats | undefined = date
+        ? {
+            dailyNum: dailyNumber(date),
+            tier: isHardFriday(date) ? `${DIFFICULTY[result.tier].label} · Hard Friday` : DIFFICULTY[result.tier].label,
+            seconds: result.seconds,
+            trace: result.trace,
+            hintsUsed: result.hints,
+          }
+        : undefined;
       const posting = lastRun && lastRun.missionId === mission.id && lastRun.tier === result.tier ? lastRun : null;
       const board = posting
         ? {
@@ -601,11 +672,12 @@ export default function GameApp() {
           reduceMotion={reduceMotion}
           isLast={!date && index === MISSIONS.length - 1}
           nextLabel={date ? 'Daily menu' : undefined}
-          onNext={() => (date ? toDaily() : setScreen({ name: 'briefing', index: index + 1 }))}
-          onCampaignEnd={() => setScreen({ name: 'card' })}
-          onMenu={toMenu}
+          onNext={() => continueAfter(date ? { name: 'daily' } : { name: 'briefing', index: index + 1 })}
+          onCampaignEnd={() => continueAfter({ name: 'card' })}
+          onMenu={() => continueAfter({ name: 'menu' })}
           card={realWorldFor(mission)}
           share={share}
+          daily={daily}
           fileName={date ? `breach-daily-${date}` : `breach-job-${String(mission.number).padStart(2, '0')}`}
           board={board}
         />

@@ -150,6 +150,8 @@ export interface MissionDef {
   realWorldKey?: string;
   /** The same walkthrough typed with the real Kali command names. The tests play it too. */
   kaliSolution: string[];
+  /** The Friday daily variant: no hints, trace at least as fast as hard tier, every decoy present. */
+  hardFriday?: boolean;
 }
 
 export type Tier = 'easy' | 'medium' | 'hard';

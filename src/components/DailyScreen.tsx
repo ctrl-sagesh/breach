@@ -5,7 +5,7 @@
 import { useEffect, useState } from 'react';
 import { DIFFICULTY, TIERS } from '../engine/difficulty';
 import type { Tier } from '../engine/types';
-import { dailyMission, dailyNumber, msUntilReset, streakFor, utcDate } from '../lib/daily';
+import { dailyMission, dailyNumber, isHardFriday, msUntilReset, streakFor, utcDate } from '../lib/daily';
 import type { SaveData } from '../lib/save';
 import { Header, Screen } from './ui';
 import Icon from './Icon';
@@ -45,7 +45,11 @@ export default function DailyScreen({ save, tier, onTier, onStart, onBoard, onBa
 
   return (
     <Screen>
-      <Header title={`DAILY ${dailyNumber(today)}`} subtitle={`${job.title}. Same job, everywhere, until UTC midnight.`} icon="calendar" />
+      <Header
+        title={isHardFriday(today) ? `DAILY ${dailyNumber(today)} ⚠ HARD FRIDAY` : `DAILY ${dailyNumber(today)}`}
+        subtitle={isHardFriday(today) ? `${job.title}. No hints today, and trace runs fast on every tier.` : `${job.title}. Same job, everywhere, until UTC midnight.`}
+        icon="calendar"
+      />
 
       <div className="mb-6 grid grid-cols-2 gap-3 text-sm sm:grid-cols-3">
         <div className="panel p-3">

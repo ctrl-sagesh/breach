@@ -6,7 +6,7 @@ import { GameSession } from '../src/engine/session';
 import { validateRun } from '../src/engine/replay';
 import { TIERS } from '../src/engine/difficulty';
 import type { MissionDef, Tier } from '../src/engine/types';
-import { dailyMission, dailyNumber, hashSeed, msUntilReset, seededRandom, shiftDate, streakFor, utcDate } from '../src/lib/daily';
+import { dailyMission, dailyNumber, hashSeed, isHardFriday, msUntilReset, seededRandom, shiftDate, streakFor, utcDate } from '../src/lib/daily';
 
 const DATES = Array.from({ length: 120 }, (_, i) => shiftDate('2026-01-01', i));
 
@@ -58,6 +58,26 @@ describe('daily generator', () => {
       expect(m.hints).toHaveLength(3);
       expect(m.machines.some((x) => x.id === 'rig')).toBe(true);
     }
+  });
+});
+
+describe('Hard Friday', () => {
+  it('flags Friday dates, and only Friday dates', () => {
+    expect(isHardFriday('2026-01-02')).toBe(true);
+    expect(isHardFriday('2026-01-01')).toBe(false);
+    expect(isHardFriday('2026-01-03')).toBe(false);
+  });
+
+  it("a Friday's daily is marked hardFriday, with every decoy present", () => {
+    const m = dailyMission('2026-01-02');
+    expect(m.hardFriday).toBe(true);
+    const target = m.machines.find((x) => x.id === 'target');
+    const decoyCount = Object.keys(target?.files ?? {}).filter((p) => p.includes('old-menu') || p.includes('cron.log') || p.includes('welcome')).length;
+    expect(decoyCount).toBe(3);
+  });
+
+  it('a non-Friday daily is not marked', () => {
+    expect(dailyMission('2026-01-01').hardFriday).toBe(false);
   });
 });
 

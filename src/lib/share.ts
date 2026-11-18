@@ -23,6 +23,47 @@ export function shareText(f: ShareFacts): string {
   return lines.join('\n');
 }
 
+/** What a daily's emoji row and caption need. Deliberately thin: nothing here could spoil the job's answer. */
+export interface DailyStats {
+  dailyNum: number;
+  tier: string;
+  seconds: number;
+  trace: number;
+  hintsUsed: number;
+}
+
+/** m:ss, no leading zero on minutes (unlike the in-game clock, which pads to fit a header). */
+function shortClock(totalSeconds: number): string {
+  const m = Math.floor(totalSeconds / 60);
+  const s = totalSeconds % 60;
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+/**
+ * One emoji per stage of the job: the mission's three hints (green if never needed, yellow at the one you used last,
+ * black once you are past it) plus a final square for how hot your trace ran. Wordle-style, and never the answer.
+ */
+export function shareEmoji(hintsUsed: number, trace: number): string {
+  const squares: string[] = [];
+  for (let i = 0; i < 3; i++) {
+    if (i >= hintsUsed) squares.push('🟩');
+    else if (i === hintsUsed - 1) squares.push('🟨');
+    else squares.push('⬛');
+  }
+  squares.push(trace < 34 ? '🟩' : trace < 67 ? '🟨' : '⬛');
+  return squares.join('');
+}
+
+/** The copyable, Wordle-style result for a daily. This is the default share; the image card is secondary. */
+export function dailyShareText(s: DailyStats): string {
+  return [
+    `BREACH Daily #${s.dailyNum} ${s.tier}`,
+    shareEmoji(s.hintsUsed, s.trace),
+    `trace ${s.trace}% · ${shortClock(s.seconds)} · ${s.hintsUsed} hint${s.hintsUsed === 1 ? '' : 's'}`,
+    SITE_URL.replace('https://', ''),
+  ].join('\n');
+}
+
 /** Draws the card onto a 2D canvas context. Green on black, the same look as the game. */
 export function drawShareCard(ctx: CanvasRenderingContext2D, f: ShareFacts, width = 1200, height = 630): void {
   const GREEN = '#33ff66';

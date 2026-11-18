@@ -13,7 +13,7 @@ import RealWorldCard from './RealWorldCard';
 import BoardPanel from './BoardPanel';
 import ShareBar from './ShareBar';
 import type { RealWorldCard as Card } from '../lib/realworld';
-import type { ShareFacts } from '../lib/share';
+import type { DailyStats, ShareFacts } from '../lib/share';
 import type { Submission } from '../lib/leaderboard';
 import { buildFeedbackMailto } from '../lib/feedback';
 import { GAME_VERSION } from '../lib/version';
@@ -31,6 +31,8 @@ interface DebriefProps {
   nextLabel?: string;
   card: Card | null;
   share: ShareFacts;
+  /** Set for a daily: switches ShareBar to the copyable emoji-row result, image card second. */
+  daily?: DailyStats;
   fileName: string;
   board: { nickname?: string; build: (nickname: string) => Submission; onNickname: (nickname: string) => void } | null;
 }
@@ -51,7 +53,7 @@ function revealed(paras: string[], n: number): string[] {
   });
 }
 
-export default function Debrief({ mission, result, hintLimit, rankName, reduceMotion, isLast, nextLabel, onNext, onCampaignEnd, onMenu, card, share, fileName, board }: DebriefProps) {
+export default function Debrief({ mission, result, hintLimit, rankName, reduceMotion, isLast, nextLabel, onNext, onCampaignEnd, onMenu, card, share, daily, fileName, board }: DebriefProps) {
   const ending = mission.endings?.find((e) => e.id === result.endingId);
   const story = paragraphs(mission.debrief);
   const storyLength = story.reduce((n, p) => n + p.length, 0);
@@ -157,7 +159,7 @@ export default function Debrief({ mission, result, hintLimit, rankName, reduceMo
 
       {storyDone ? (
         <div className="mb-6">
-          <ShareBar facts={share} fileName={fileName} />
+          <ShareBar facts={share} fileName={fileName} daily={daily} />
         </div>
       ) : null}
 
