@@ -29,7 +29,7 @@ export default function Transfer({ reduceMotion, onDone }: TransferProps) {
     if (step >= TOTAL_STEPS) {
       if (!granted) {
         setGranted(true);
-        play('granted');
+        play('transfer');
       }
       return;
     }

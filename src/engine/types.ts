@@ -31,7 +31,15 @@ export type SoundEvent =
   | 'fail'
   | 'chatter'
   | 'ping'
-  | 'boom';
+  | 'boom'
+  | 'hint'
+  | 'hover'
+  | 'click'
+  | 'transition'
+  | 'crt-on'
+  | 'crt-off'
+  | 'achievement'
+  | 'transfer';
 
 export interface FileDef {
   content: string;

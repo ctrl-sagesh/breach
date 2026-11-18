@@ -1,7 +1,11 @@
-// Sound synthesised with the Web Audio API. No audio files.
-// Two buses: effects and music, each with its own toggle, both under a master volume.
-// Everything fails silently when audio is unsupported or not yet allowed to start (autoplay policy).
-// Levels are kept low on purpose: nothing should be harsh.
+// Real recordings, played through the Web Audio API (see assets/audio/LICENSES.md for what and where from).
+// Three buses: effects, music and keyboard, each with its own toggle, all under a master volume, plus a quiet
+// ambient bed that runs under everything and comes up a little in missions.
+// Everything fails silently: audio unsupported, not yet allowed to start (autoplay policy), or a clip that
+// 404s or fails to decode. The game keeps working either way.
+//
+// The generative soundtrack (lib/music.ts) is a separate system, kept because it is built to never audibly loop
+// over a long session the way a fixed recording would; this file only starts it and feeds it the trace.
 
 import type { SoundEvent } from '../engine/types';
 import { MusicPlayer } from './music';
@@ -24,6 +28,8 @@ interface Graph {
   sfxBus: GainNode;
   musicBus: GainNode;
   keyBus: GainNode;
+  ambientGain: GainNode;
+  ambientSource: AudioBufferSourceNode | null;
   music: MusicPlayer | null;
 }
 
@@ -31,11 +37,15 @@ const MASTER = 0.5; // global headroom
 const SFX_LEVEL = 0.7;
 /** Minimum gap between key sounds, so holding a key (OS auto-repeat) never becomes a continuous hiss. */
 const KEY_THROTTLE_MS = 30;
+/** The hum's own level within the sfx bus: quiet at rest, a little more present once a mission is live. */
+const AMBIENT_MENU = 0.35;
+const AMBIENT_MISSION = 0.85;
 
-let settings: AudioSettings = { volume: 0.8, sfx: true, music: true, musicVolume: 0.4, track: 'night-shift', keySounds: true, keySoundsVolume: 0.5 };
+let settings: AudioSettings = { volume: 0.8, sfx: true, music: true, musicVolume: 0.4, track: 'cyberpunk-drone', keySounds: true, keySoundsVolume: 0.5 };
 let graph: Graph | null = null;
 let lastKey = 0;
 let tension = 0;
+let ambienceActive = false;
 
 function build(): Graph | null {
   try {
@@ -50,11 +60,15 @@ function build(): Graph | null {
     const sfxBus = ctx.createGain();
     const musicBus = ctx.createGain();
     const keyBus = ctx.createGain();
+    const ambientGain = ctx.createGain();
+    ambientGain.gain.value = ambienceActive ? AMBIENT_MISSION : AMBIENT_MENU;
     sfxBus.connect(master);
     musicBus.connect(master);
     keyBus.connect(master);
-    graph = { ctx, sfxBus, musicBus, keyBus, music: null };
+    ambientGain.connect(sfxBus);
+    graph = { ctx, sfxBus, musicBus, keyBus, ambientGain, ambientSource: null, music: null };
     applySettings();
+    startAmbientLoop(graph);
     return graph;
   } catch {
     return null;
@@ -81,44 +95,83 @@ export function setAudioSettings(next: AudioSettings): void {
   applySettings();
 }
 
-interface ToneOptions {
-  type?: OscillatorType;
-  freq: number;
-  endFreq?: number;
-  duration: number;
-  volume?: number;
-  delay?: number;
-  /** Which bus to render into. Defaults to sfxBus; the keyboard sound uses keyBus instead. */
-  bus?: GainNode;
+// ---- sample loading ---------------------------------------------------------------------------
+
+/** Fetches and decodes a clip once; later calls (and failures) reuse the same promise. Relative URL, so a nested deploy still finds it. */
+const bufferCache = new Map<string, Promise<AudioBuffer | null>>();
+function loadBuffer(ctx: AudioContext, url: string): Promise<AudioBuffer | null> {
+  let p = bufferCache.get(url);
+  if (p) return p;
+  p = fetch(url)
+    .then((r) => r.arrayBuffer())
+    .then((data) => ctx.decodeAudioData(data))
+    .catch(() => null);
+  bufferCache.set(url, p);
+  return p;
 }
 
-function tone(g: Graph, o: ToneOptions): void {
-  const { ctx } = g;
-  const start = ctx.currentTime + (o.delay ?? 0);
-  const osc = ctx.createOscillator();
-  const gain = ctx.createGain();
-  osc.type = o.type ?? 'square';
-  osc.frequency.setValueAtTime(o.freq, start);
-  if (o.endFreq) osc.frequency.exponentialRampToValueAtTime(o.endFreq, start + o.duration);
-  gain.gain.setValueAtTime(o.volume ?? 0.06, start);
-  gain.gain.exponentialRampToValueAtTime(0.0001, start + o.duration);
-  osc.connect(gain).connect(o.bus ?? g.sfxBus);
-  osc.start(start);
-  osc.stop(start + o.duration + 0.02);
-}
-
-function noise(g: Graph, duration: number, volume: number, bus?: GainNode, delay = 0): void {
-  const { ctx } = g;
-  const length = Math.floor(ctx.sampleRate * duration);
-  const buffer = ctx.createBuffer(1, length, ctx.sampleRate);
-  const data = buffer.getChannelData(0);
-  for (let i = 0; i < length; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / length);
-  const src = ctx.createBufferSource();
-  const gain = ctx.createGain();
-  gain.gain.value = volume;
+function playBuffer(g: Graph, buffer: AudioBuffer, bus: GainNode, volume = 1, rate = 1): void {
+  const src = g.ctx.createBufferSource();
   src.buffer = buffer;
-  src.connect(gain).connect(bus ?? g.sfxBus);
-  src.start(ctx.currentTime + delay);
+  if (rate !== 1) src.playbackRate.value = rate;
+  if (volume === 1) {
+    src.connect(bus);
+  } else {
+    const gain = g.ctx.createGain();
+    gain.gain.value = volume;
+    src.connect(gain).connect(bus);
+  }
+  src.start();
+}
+
+/** One clip per discrete sound event. Events missing here (the key variants) have their own playback path below. */
+const SFX_URLS: Partial<Record<SoundEvent, string>> = {
+  command: 'audio/sfx/command.mp3',
+  error: 'audio/sfx/error.mp3',
+  enter: 'audio/sfx/enter.mp3',
+  alert: 'audio/sfx/alert.mp3',
+  alarm: 'audio/sfx/alarm.mp3',
+  granted: 'audio/sfx/granted.mp3',
+  denied: 'audio/sfx/denied.mp3',
+  trace: 'audio/sfx/trace.mp3',
+  glitch: 'audio/sfx/glitch.mp3',
+  tick: 'audio/sfx/tick.mp3',
+  rank: 'audio/sfx/rank.mp3',
+  sting: 'audio/sfx/sting.mp3',
+  win: 'audio/sfx/win.mp3',
+  fail: 'audio/sfx/fail.mp3',
+  chatter: 'audio/sfx/chatter.mp3',
+  ping: 'audio/sfx/ping.mp3',
+  boom: 'audio/sfx/boom.mp3',
+  hint: 'audio/sfx/hint.mp3',
+  hover: 'audio/sfx/hover.mp3',
+  click: 'audio/sfx/click.mp3',
+  transition: 'audio/sfx/transition.mp3',
+  'crt-on': 'audio/sfx/crt-on.mp3',
+  'crt-off': 'audio/sfx/crt-off.mp3',
+  achievement: 'audio/sfx/achievement.mp3',
+  transfer: 'audio/sfx/transfer.mp3',
+};
+
+const AMBIENT_URL = 'audio/ambient/server-hum.mp3';
+
+function startAmbientLoop(g: Graph): void {
+  void loadBuffer(g.ctx, AMBIENT_URL).then((buf) => {
+    if (!buf || g.ambientSource) return;
+    const src = g.ctx.createBufferSource();
+    src.buffer = buf;
+    src.loop = true;
+    src.connect(g.ambientGain);
+    src.start();
+    g.ambientSource = src;
+  });
+}
+
+/** 0 outside a mission, 1 inside one. The hum stays on throughout; only its level changes. */
+export function setAmbienceActive(active: boolean): void {
+  ambienceActive = active;
+  if (!graph) return;
+  graph.ambientGain.gain.setTargetAtTime(active ? AMBIENT_MISSION : AMBIENT_MENU, graph.ctx.currentTime, 1.5);
 }
 
 /**
@@ -167,40 +220,35 @@ function jitter(center: number, spread: number): number {
   return center * (1 + (Math.random() * 2 - 1) * spread);
 }
 
-interface KeyProfile {
-  freq: number;
-  bodyDuration: number;
-  bodyVolume: number;
-  clickDuration: number;
-  clickVolume: number;
-}
-
-/** Regular keys, space (deeper, bigger switch), Enter (heavier) and Backspace (lighter) each get their own feel. */
-const KEY_PROFILES: Record<KeySoundVariant, KeyProfile> = {
-  key: { freq: 150, bodyDuration: 0.045, bodyVolume: 0.05, clickDuration: 0.006, clickVolume: 0.032 },
-  'key-space': { freq: 92, bodyDuration: 0.062, bodyVolume: 0.062, clickDuration: 0.009, clickVolume: 0.03 },
-  'key-enter': { freq: 78, bodyDuration: 0.08, bodyVolume: 0.08, clickDuration: 0.008, clickVolume: 0.038 },
-  'key-backspace': { freq: 195, bodyDuration: 0.028, bodyVolume: 0.032, clickDuration: 0.005, clickVolume: 0.024 },
+/** Several real keystrokes per variant, sliced from two different mechanical keyboard recordings (see LICENSES.md). */
+const KEY_URLS: Record<KeySoundVariant, string[]> = {
+  key: [
+    'audio/keys/key-1.mp3',
+    'audio/keys/key-2.mp3',
+    'audio/keys/key-3.mp3',
+    'audio/keys/key-4.mp3',
+    'audio/keys/key-5.mp3',
+    'audio/keys/key-6.mp3',
+    'audio/keys/key-7.mp3',
+    'audio/keys/key-8.mp3',
+  ],
+  'key-space': ['audio/keys/space-1.mp3'],
+  'key-enter': ['audio/keys/enter-1.mp3'],
+  'key-backspace': ['audio/keys/backspace-1.mp3'],
 };
 
 /**
- * A mechanical switch: a short noise transient (the click) under a low pitched body (the thock), both randomised in
- * pitch, level and timing so typing never sounds like a loop. Enter adds a tiny metallic spring release after the hit.
+ * A real mechanical keystroke, picked at random from this variant's slices, with a little pitch (playback rate)
+ * and volume jitter so repeated keys never sound identical.
  */
 function mechanicalKey(g: Graph, variant: KeySoundVariant): void {
-  const bus = g.keyBus;
-  const profile = KEY_PROFILES[variant];
-  const startDelay = Math.random() * 0.006; // up to 6ms, so repeated keys never land exactly on the beat
-  const freq = jitter(profile.freq, 0.08);
-  const bodyVolume = jitter(profile.bodyVolume, 0.18);
-  const clickVolume = jitter(profile.clickVolume, 0.2);
-
-  noise(g, profile.clickDuration, clickVolume, bus, startDelay);
-  tone(g, { type: 'sine', freq, endFreq: freq * 0.72, duration: profile.bodyDuration, volume: bodyVolume, delay: startDelay, bus });
-
-  if (variant === 'key-enter') {
-    tone(g, { type: 'triangle', freq: jitter(2200, 0.1), duration: 0.03, volume: jitter(0.014, 0.3), delay: startDelay + 0.016, bus });
-  }
+  const urls = KEY_URLS[variant];
+  const url = urls[Math.floor(Math.random() * urls.length)];
+  const rate = jitter(1, 0.08);
+  const volume = jitter(1, 0.22);
+  void loadBuffer(g.ctx, url).then((buf) => {
+    if (buf) playBuffer(g, buf, g.keyBus, volume, rate);
+  });
 }
 
 export function play(event: SoundEvent): void {
@@ -218,72 +266,9 @@ export function play(event: SoundEvent): void {
   }
 
   if (!settings.sfx) return;
-  switch (event) {
-    case 'command':
-      tone(g, { type: 'sine', freq: 660, duration: 0.05, volume: 0.035 });
-      break;
-    case 'error':
-      tone(g, { type: 'square', freq: 180, endFreq: 130, duration: 0.12, volume: 0.04 });
-      break;
-    case 'enter':
-      tone(g, { type: 'square', freq: 220, endFreq: 110, duration: 0.09, volume: 0.05 });
-      break;
-    case 'tick':
-      tone(g, { type: 'triangle', freq: 1500, duration: 0.03, volume: 0.03 });
-      break;
-    case 'alert':
-      tone(g, { type: 'sawtooth', freq: 880, duration: 0.12, volume: 0.035 });
-      tone(g, { type: 'sawtooth', freq: 660, duration: 0.12, volume: 0.035, delay: 0.14 });
-      break;
-    case 'alarm':
-      [0, 0.28, 0.56].forEach((d) => tone(g, { type: 'square', freq: 740, endFreq: 520, duration: 0.22, volume: 0.035, delay: d }));
-      break;
-    case 'granted':
-      // Digital chime: three bright bells, the last one ringing longest.
-      [1318, 1760, 2093].forEach((f, i) => {
-        tone(g, { type: 'sine', freq: f, duration: i === 2 ? 0.5 : 0.22, volume: 0.04, delay: i * 0.07 });
-        tone(g, { type: 'triangle', freq: f * 2, duration: 0.12, volume: 0.008, delay: i * 0.07 });
-      });
-      break;
-    case 'denied':
-      // Harsh buzz: two detuned saws with a falling pitch.
-      tone(g, { type: 'sawtooth', freq: 116, endFreq: 96, duration: 0.45, volume: 0.045 });
-      tone(g, { type: 'square', freq: 122, endFreq: 100, duration: 0.45, volume: 0.02 });
-      break;
-    case 'chatter':
-      // Fast data chatter while the cracker runs: many short blips at random pitches.
-      for (let i = 0; i < 12; i++) tone(g, { type: 'square', freq: 1800 + Math.random() * 800, duration: 0.012, volume: 0.011, delay: i * 0.024 });
-      break;
-    case 'ping':
-      // Radar ping for each open port found.
-      tone(g, { type: 'sine', freq: 1200, endFreq: 2000, duration: 0.12, volume: 0.04 });
-      break;
-    case 'boom':
-      // Explosion: a low sine drop under a burst of noise.
-      tone(g, { type: 'sine', freq: 95, endFreq: 28, duration: 0.9, volume: 0.13 });
-      noise(g, 0.7, 0.16);
-      break;
-    case 'trace':
-      [0, 0.18].forEach((d) => tone(g, { type: 'triangle', freq: 1000, duration: 0.08, volume: 0.04, delay: d }));
-      break;
-    case 'glitch':
-      noise(g, 0.25, 0.08);
-      tone(g, { type: 'sawtooth', freq: 1400, endFreq: 90, duration: 0.25, volume: 0.03 });
-      break;
-    case 'rank':
-      tone(g, { type: 'square', freq: 90, endFreq: 45, duration: 0.25, volume: 0.06 });
-      [392, 494, 587].forEach((f, i) => tone(g, { type: 'triangle', freq: f, duration: 0.3, volume: 0.04, delay: 0.12 + i * 0.07 }));
-      break;
-    case 'sting':
-      // Triumphant sting: a rising arpeggio over a short synth pad.
-      [392, 523, 659, 784].forEach((f, i) => tone(g, { type: 'triangle', freq: f, duration: 0.22, volume: 0.045, delay: i * 0.1 }));
-      tone(g, { type: 'sawtooth', freq: 196, duration: 0.9, volume: 0.02, delay: 0.1 });
-      break;
-    case 'win':
-      [392, 523, 659, 784, 1047].forEach((f, i) => tone(g, { type: 'triangle', freq: f, duration: 0.2, volume: 0.05, delay: i * 0.1 }));
-      break;
-    case 'fail':
-      tone(g, { type: 'sawtooth', freq: 400, endFreq: 50, duration: 0.8, volume: 0.05 });
-      break;
-  }
+  const url = SFX_URLS[event];
+  if (!url) return;
+  void loadBuffer(g.ctx, url).then((buf) => {
+    if (buf) playBuffer(g, buf, g.sfxBus);
+  });
 }

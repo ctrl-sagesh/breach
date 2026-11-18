@@ -8,7 +8,7 @@ import type { Tier } from '../engine/types';
 import type { ThemeId } from './themes';
 import type { AttemptRecord } from './history';
 
-export type MusicTrack = 'night-shift' | 'signal' | 'cold-room';
+export type MusicTrack = 'cyberpunk-drone' | 'night-shift' | 'signal' | 'cold-room';
 
 export type TypingSpeed = 'fast' | 'normal' | 'instant';
 /** 'system' follows the OS "reduce motion" setting. */
@@ -78,7 +78,7 @@ export const DEFAULT_SAVE: SaveData = {
   counters: { sudoTries: 0 },
   dailies: {},
   history: [],
-  track: 'night-shift',
+  track: 'cyberpunk-drone',
   musicVolume: 0.4,
   keySounds: true,
   keySoundsVolume: 0.5,

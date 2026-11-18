@@ -112,6 +112,7 @@ export const systemCommands: CommandSpec[] = [
       }
       s.hintsUsed++;
       out.print(`[HINT ${s.hintsUsed}/${s.hintLimit}] ${s.mission.hints[s.hintsUsed - 1]}`, 'warn');
+      out.sound('hint');
     },
   },
   {

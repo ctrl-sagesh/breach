@@ -6,6 +6,11 @@ next-env.d.ts
 
 .vercel
 
+# Raw audio recordings used to build public/audio/. Never commit these (some are large, none need to ship as-is).
+# Run `npm run audio:build` after dropping new files in here. See assets/audio/LICENSES.md for what's inside.
+sound-source/
+
 # Local secrets and keys. Never commit these.
 .env*.local
 .env
+supabase/.temp

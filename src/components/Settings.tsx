@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { play } from '../lib/audio';
 import { THEMES, isThemeUnlocked, type ThemeId } from '../lib/themes';
 import type { MotionSetting, SaveData, TypingSpeed } from '../lib/save';
 import { clearedOnAnyTier } from '../lib/progress';
@@ -151,7 +152,15 @@ export default function Settings({ save, onChange, onReset, onBack, onRestored, 
       </section>
 
       <section className="mb-8 grid gap-3 sm:grid-cols-2">
-        <button type="button" className="btn" aria-pressed={save.crt} onClick={() => onChange({ crt: !save.crt })}>
+        <button
+          type="button"
+          className="btn"
+          aria-pressed={save.crt}
+          onClick={() => {
+            play(save.crt ? 'crt-off' : 'crt-on');
+            onChange({ crt: !save.crt });
+          }}
+        >
           <Icon name="crt" size={16} />CRT effect: {save.crt ? 'on' : 'off'}
         </button>
       </section>

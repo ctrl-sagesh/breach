@@ -12,7 +12,7 @@ import { Header, Screen } from './ui';
 export function AchievementToast({ items, onDismiss }: { items: AchievementDef[]; onDismiss: () => void }) {
   useEffect(() => {
     if (items.length === 0) return;
-    play('granted');
+    play('achievement');
     const t = window.setTimeout(onDismiss, 3800);
     return () => window.clearTimeout(t);
   }, [items, onDismiss]);

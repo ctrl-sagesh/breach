@@ -26,13 +26,31 @@ export interface NoteEvent {
   level: number;
 }
 
-export const TRACKS: MusicTrack[] = ['night-shift', 'signal', 'cold-room'];
+export const TRACKS: MusicTrack[] = ['cyberpunk-drone', 'night-shift', 'signal', 'cold-room'];
 
 export const TRACK_LABELS: Record<MusicTrack, string> = {
+  'cyberpunk-drone': 'Cyberpunk Drone',
   'night-shift': 'Night Shift',
   signal: 'Signal',
   'cold-room': 'Cold Room',
 };
+
+/** Where the real audio for the main track and the tension layer's heartbeat live. Relative, so a nested deploy still finds them. */
+const CYBERPUNK_DRONE_URL = 'audio/music/cyberpunk-drone.mp3';
+const HEARTBEAT_SAMPLE_URL = 'audio/music/heartbeat.mp3';
+
+/** Fetches and decodes a sample once, caching the result (including a failure) for every later caller. */
+const sampleCache = new Map<string, Promise<AudioBuffer | null>>();
+function loadSample(ctx: BaseAudioContext, url: string): Promise<AudioBuffer | null> {
+  let p = sampleCache.get(url);
+  if (p) return p;
+  p = fetch(url)
+    .then((r) => r.arrayBuffer())
+    .then((data) => ctx.decodeAudioData(data))
+    .catch(() => null);
+  sampleCache.set(url, p);
+  return p;
+}
 
 /** Tempo of each track's beat, in beats per minute. Slow on purpose: these are for thinking, not dancing. */
 export function tempoFor(track: MusicTrack): number {
@@ -189,6 +207,11 @@ export class TrackPlayer {
   private nextBar = 0;
   private barStart = 0;
   private intensity = 0;
+  private stopped = false;
+  /** The real recording under Cyberpunk Drone's bed. Null for the procedural tracks, or until it loads. */
+  private bed: AudioBufferSourceNode | null = null;
+  /** The real heartbeat hit, used by the tension layer's heartbeat events once loaded, on every track. */
+  private heartbeatBuffer: AudioBuffer | null = null;
 
   constructor(ctx: AudioContext, destination: AudioNode, track: MusicTrack, reverbIr: AudioBuffer) {
     this.ctx = ctx;
@@ -216,6 +239,30 @@ export class TrackPlayer {
     this.wet = ctx.createGain();
     this.wet.gain.value = 0.38;
     this.reverb.connect(this.wet).connect(this.out);
+
+    void loadSample(ctx, HEARTBEAT_SAMPLE_URL).then((buf) => {
+      this.heartbeatBuffer = buf;
+    });
+    if (track === 'cyberpunk-drone') {
+      void loadSample(ctx, CYBERPUNK_DRONE_URL).then((buf) => {
+        if (buf) this.attachBed(buf);
+      });
+    }
+  }
+
+  /**
+   * Starts the real recording looping straight into `out`, bypassing the lowpass filter: a mixed track should not
+   * get dull at rest the way the procedural pads are designed to. The tension layer (heartbeat, ticks) still runs
+   * through the filtered bus on top of it. A no-op if this player was already stopped.
+   */
+  private attachBed(buffer: AudioBuffer): void {
+    if (this.stopped || this.bed) return;
+    const src = this.ctx.createBufferSource();
+    src.buffer = buffer;
+    src.loop = true;
+    src.connect(this.out);
+    src.start(this.ctx.currentTime);
+    this.bed = src;
   }
 
   get running(): boolean {
@@ -232,6 +279,13 @@ export class TrackPlayer {
   stop(): void {
     if (this.timer !== null) window.clearInterval(this.timer);
     this.timer = null;
+    this.stopped = true;
+    try {
+      this.bed?.stop();
+    } catch {
+      // Already stopped or never started: fine either way.
+    }
+    this.bed = null;
   }
 
   /** Fades this track in or out over a few seconds. */
@@ -304,6 +358,16 @@ export class TrackPlayer {
       case 'glitch':
         return this.noise(when, dur, 0.22 * e.level, 3200, this.reverb);
       case 'heartbeat': {
+        if (this.heartbeatBuffer) {
+          const src = ctx.createBufferSource();
+          src.buffer = this.heartbeatBuffer;
+          const amp = ctx.createGain();
+          amp.gain.value = e.level * 0.9;
+          src.connect(amp).connect(this.tension);
+          src.start(when);
+          return;
+        }
+        // The real sample has not loaded yet (or failed): the procedural thump still carries the beat.
         const osc = ctx.createOscillator();
         const amp = ctx.createGain();
         osc.type = 'sine';

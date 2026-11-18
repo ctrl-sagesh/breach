@@ -3,14 +3,14 @@
 // Top-level screen router. Owns the save data, the current attempt, the run log that feeds the leaderboard and the ops
 // log, achievements, cloud sync, and transitions between screens.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import { GameSession } from '../engine/session';
 import { rankForScore, scoreMission, type MissionResult } from '../engine/scoring';
 import { DIFFICULTY, pointsFor } from '../engine/difficulty';
 import type { MissionDef, Tier } from '../engine/types';
 import type { RunCommand } from '../engine/replay';
 import { MISSIONS } from '../missions';
-import { setAudioSettings, setMusicTrack, setTension, startMusic } from '../lib/audio';
+import { play, setAmbienceActive, setAudioSettings, setMusicTrack, setTension, startMusic } from '../lib/audio';
 import { setHapticsEnabled } from '../lib/haptics';
 import { DEFAULT_SAVE, effectiveReduceMotion, loadSave, persistSave, type SaveData } from '../lib/save';
 import { campaignDone, factsFromWin, newlyUnlocked, type AchievementDef } from '../lib/achievements';
@@ -170,12 +170,14 @@ export default function GameApp() {
     if (lastScreen.current !== screen.name) {
       lastScreen.current = screen.name;
       setWipeKey((k) => k + 1);
+      play('transition');
     }
   }, [screen.name]);
 
   // Menus and the landing page are calm. The soundtrack only follows the trace inside a mission.
   useEffect(() => {
     if (screen.name !== 'play') setTension(0);
+    setAmbienceActive(screen.name === 'play');
   }, [screen.name]);
 
   const reduceMotion = effectiveReduceMotion(save.motion, systemReduce);
@@ -686,8 +688,26 @@ export default function GameApp() {
     }
   }
 
+  const lastHoverEl = useRef<Element | null>(null);
+  const onPointerOverCapture = (e: ReactPointerEvent) => {
+    const btn = (e.target as Element).closest('.btn');
+    if (btn && btn !== lastHoverEl.current) {
+      lastHoverEl.current = btn;
+      play('hover');
+    } else if (!btn) {
+      lastHoverEl.current = null;
+    }
+  };
+  const onClickCapture = (e: ReactMouseEvent) => {
+    if ((e.target as Element).closest('.btn')) play('click');
+  };
+
   return (
-    <div className={`relative min-h-dvh overflow-x-hidden ${reduceMotion ? 'reduce-motion' : ''}`}>
+    <div
+      className={`relative min-h-dvh overflow-x-hidden ${reduceMotion ? 'reduce-motion' : ''}`}
+      onPointerOver={onPointerOverCapture}
+      onClick={onClickCapture}
+    >
       {body}
       {wipeKey > 0 && !reduceMotion ? <div key={wipeKey} className="wipe" aria-hidden="true" /> : null}
       <AchievementToast items={toast} onDismiss={() => setToast([])} />

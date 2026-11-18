@@ -23,7 +23,17 @@ export default function About({ onBack }: { onBack: () => void }) {
 
         <section>
           <h2 className="mb-2 text-xs tracking-widest text-[var(--dim)]">BUILT WITH</h2>
-          <p>Next.js and TypeScript, rendered as a static site. Sound is synthesised in the browser with the Web Audio API — no audio files. The global board and cloud save run on Supabase, behind server-side replay checks so a score can&apos;t be faked.</p>
+          <p>Next.js and TypeScript, rendered as a static site. The soundtrack&apos;s pads and tension layer are synthesised live with the Web Audio API; everything else you hear is a real recording. The global board and cloud save run on Supabase, behind server-side replay checks so a score can&apos;t be faked.</p>
+        </section>
+
+        <section>
+          <h2 className="mb-2 text-xs tracking-widest text-[var(--dim)]">AUDIO CREDITS</h2>
+          <p>
+            Interface sounds by <a className="underline underline-offset-4" href="https://kenney.nl/" target="_blank" rel="noreferrer">Kenney</a> (CC0).
+            Keyboard, alarm, modem and ambience recordings from <a className="underline underline-offset-4" href="https://freesound.org/" target="_blank" rel="noreferrer">Freesound</a> contributors
+            stu556, za-games, wtermini, alphatone, rhinenux, soundandmelodies and music_is_wiggly_air (CC0). Soundtrack &quot;Cyberpunk Drone&quot; by Leberche (Pixabay Content License).
+          </p>
+          <p className="mt-1 text-xs text-[var(--dim)]">Full list with links in the repository&apos;s assets/audio/LICENSES.md.</p>
         </section>
 
         <section>
