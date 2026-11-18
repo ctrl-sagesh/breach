@@ -1,4 +1,4 @@
-name: Supabase keepalive
+name: Supabase keepalive name: Supabase keepalive ping
 
 # Supabase's free tier pauses a project after a week with no activity. This makes one lightweight, read-only
 # request to the leaderboard every few days so BREACH's project never pauses. It uses the publishable key only
