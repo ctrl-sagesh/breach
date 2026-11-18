@@ -10,7 +10,7 @@ next-env.d.ts
 # Run `npm run audio:build` after dropping new files in here. See assets/audio/LICENSES.md for what's inside.
 sound-source/
 
-# Local secrets and keys. Never commit these.
-.env*.local
-.env
+# Local secrets and keys. Never commit these. (.env.example is the one intentional exception: placeholders only.)
+.env*
+!.env.example
 supabase/.temp

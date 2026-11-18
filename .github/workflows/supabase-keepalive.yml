@@ -1,0 +1,31 @@
+name: Supabase keepalive
+
+# Supabase's free tier pauses a project after a week with no activity. This makes one lightweight, read-only
+# request to the leaderboard every few days so BREACH's project never pauses. It uses the publishable key only
+# (the same one the browser ships with) — never the service-role secret, which this workflow never sees.
+#
+# Cron has no "every N days" unit, so this uses day-of-month step syntax (runs on the 1st, 4th, 7th, ... of each
+# month) rather than an exact rolling 3-day cadence. Close enough for keeping a free-tier project awake.
+
+on:
+  schedule:
+    - cron: '0 6 */3 * *'
+  workflow_dispatch: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Read one row from the public leaderboard
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
+        run: |
+          if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_PUBLISHABLE_KEY" ]; then
+            echo "SUPABASE_URL or SUPABASE_PUBLISHABLE_KEY secret is not set; skipping." >&2
+            exit 0
+          fi
+          curl -sf "$SUPABASE_URL/rest/v1/players?select=id&limit=1" \
+            -H "apikey: $SUPABASE_PUBLISHABLE_KEY" \
+            -H "Authorization: Bearer $SUPABASE_PUBLISHABLE_KEY" \
+            -o /dev/null
