@@ -25,7 +25,7 @@ jobs:
             echo "SUPABASE_URL or SUPABASE_PUBLISHABLE_KEY secret is not set; skipping." >&2
             exit 0
           fi
-          code=$(curl -s -o /tmp/resp.txt -w "%{http_code}" "$SUPABASE_URL/rest/v1/players?select=id&limit=1" -H "apikey: $SUPABASE_PUBLISHABLE_KEY")
+          code=$(curl -s -o /tmp/resp.txt -w "%{http_code}" "$SUPABASE_URL/rest/v1/runs?select=*&limit=1" -H "apikey: $SUPABASE_PUBLISHABLE_KEY")
           echo "Supabase answered HTTP $code"
           cat /tmp/resp.txt
           [ "$code" -lt 400 ]
