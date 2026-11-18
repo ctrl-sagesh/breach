@@ -2,4 +2,4 @@
 // share card, robots.txt and sitemap.xml — imports this instead of hardcoding the domain.
 // Set NEXT_PUBLIC_SITE_URL when building for a different deployment; this is the production fallback.
 
-export const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://breach-sh.vercel.app';
+export const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://breachgame.xyz';

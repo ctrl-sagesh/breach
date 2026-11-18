@@ -3,7 +3,7 @@
 import { describe, expect, it } from 'vitest';
 import { corsHeaders, originAllowed, parseAllowedOrigins } from '../src/lib/origins';
 
-const ALLOWED = ['https://breach-sh.vercel.app', 'https://*.itch.zone', 'https://*.crazygames.com', 'https://crazygames.com', 'http://localhost:3000'];
+const ALLOWED = ['https://breachgame.xyz', 'https://*.itch.zone', 'https://*.crazygames.com', 'https://crazygames.com', 'http://localhost:3000'];
 
 describe('parseAllowedOrigins', () => {
   it('splits, trims and drops empty entries', () => {
@@ -17,7 +17,7 @@ describe('parseAllowedOrigins', () => {
 
 describe('originAllowed: the hosts this game actually needs', () => {
   it('matches the exact site', () => {
-    expect(originAllowed('https://breach-sh.vercel.app', ALLOWED)).toBe(true);
+    expect(originAllowed('https://breachgame.xyz', ALLOWED)).toBe(true);
   });
 
   it('matches itch.io\'s game-serving subdomain, and other itch.zone subdomains', () => {
@@ -66,7 +66,7 @@ describe('originAllowed: everything else stays rejected', () => {
   });
 
   it('rejects everything when the allow list is empty', () => {
-    expect(originAllowed('https://breach-sh.vercel.app', [])).toBe(false);
+    expect(originAllowed('https://breachgame.xyz', [])).toBe(false);
   });
 });
 
