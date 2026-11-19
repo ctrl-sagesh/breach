@@ -148,6 +148,8 @@ export interface MissionDef {
   inbox: EmailDef[];
   flag: string;
   hints: [string, string, string];
+  /** A short line shown under the trace bar, for a player who needs the goal restated mid-mission. */
+  objective?: string;
   /** If present, submitting the flag opens a choice that selects an ending. */
   endings?: EndingDef[];
   /** Per-tier additions. Missing tiers play the base mission unchanged. */

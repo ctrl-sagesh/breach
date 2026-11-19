@@ -120,6 +120,7 @@ export default function MissionScreen({ mission, session, attemptKey, speed, red
 
         <div className="px-3 py-2">
           <TraceMeter value={trace} />
+          {mission.objective ? <p className="mt-1 text-xs text-[var(--dim)]">{mission.objective}</p> : null}
         </div>
 
         {phase !== 'traced' ? (

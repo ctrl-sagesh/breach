@@ -1108,20 +1108,35 @@ var textCommands = [
 ];
 
 // src/engine/commands/index.ts
+function missionCommands(mission9) {
+  const seen = /* @__PURE__ */ new Set();
+  const specs = [];
+  const add = (spec) => {
+    if (!spec || seen.has(spec.name)) return;
+    seen.add(spec.name);
+    specs.push(spec);
+  };
+  for (const step of mission9.solution) add(COMMANDS.get(step.trim().split(/\s+/)[0] ?? ""));
+  add(COMMANDS.get("help"));
+  return specs;
+}
 var helpCommand = {
   name: "help",
   usage: "help [command]",
   summary: "list commands, or show one command with an example",
   example: "help grep",
   run(s, args, out) {
-    if (args.length > 0) {
+    if (args.length > 0 && args[0] !== "all") {
       showCommand(args[0], out, "help");
       return;
     }
+    const scoped = args[0] !== "all" && s.tier === "easy";
     out.print("BREACH shell. Tab completes (twice lists), up/down recalls history, Ctrl+L clears.", "sys");
     out.print("");
-    for (const c of ALL) out.print(`  ${c.usage.padEnd(30)} ${c.summary}`);
+    const list = scoped ? missionCommands(s.baseMission) : ALL;
+    for (const c of list) out.print(`  ${c.usage.padEnd(30)} ${c.summary}`);
     out.print("");
+    if (scoped) out.print("That's what this job needs. Type 'help all' to see every command on this rig.", "dim");
     out.print("Password prompts do not echo.", "dim");
     if (s.config.recoveryHints !== "none") {
       out.print("At a Password prompt, type ? to start account recovery (security questions), if the host offers it.", "dim");
@@ -2007,13 +2022,14 @@ var mission = {
     "The next posting has a company name this time."
   ],
   start: { machine: "rig", cwd: "/home/ghost" },
+  objective: "Find the admin login on the NAS, then submit the flag.",
   machines: [
     makeRig([FENWICK_IP], {
       "/home/ghost/job.txt": {
         owner: "ghost",
         content: `JOB: Fenwick Accounts (${FENWICK_IP})
 Goal: get into the NAS, find the flag, submit it.
-Tools on this rig: scan, connect, ls, cd, cat, login, submit.
+Tools on this rig: nmap, ssh, ls, cd, cat, su, submit.
 Type "help" to see everything.`
       }
     }),

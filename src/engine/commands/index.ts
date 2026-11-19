@@ -1,6 +1,7 @@
 // Command registry. Add a command by writing a CommandSpec and listing it here. Aliases are registered from the spec.
 
 import { closest } from '../suggest';
+import type { MissionDef } from '../types';
 import { cryptoCommands } from './crypto';
 import { fileCommands } from './files';
 import { networkCommands } from './network';
@@ -10,20 +11,37 @@ import { textCommands } from './text';
 import type { CommandSpec } from './types';
 import type { Out } from "../session";
 
+/** The commands this mission's own solution actually uses, aliases resolved, plus help itself. Shown first on Easy. */
+function missionCommands(mission: MissionDef): CommandSpec[] {
+  const seen = new Set<string>();
+  const specs: CommandSpec[] = [];
+  const add = (spec: CommandSpec | undefined) => {
+    if (!spec || seen.has(spec.name)) return;
+    seen.add(spec.name);
+    specs.push(spec);
+  };
+  for (const step of mission.solution) add(COMMANDS.get(step.trim().split(/\s+/)[0] ?? ''));
+  add(COMMANDS.get('help'));
+  return specs;
+}
+
 const helpCommand: CommandSpec = {
   name: 'help',
   usage: 'help [command]',
   summary: 'list commands, or show one command with an example',
   example: 'help grep',
   run(s, args, out) {
-    if (args.length > 0) {
+    if (args.length > 0 && args[0] !== 'all') {
       showCommand(args[0], out, 'help');
       return;
     }
+    const scoped = args[0] !== 'all' && s.tier === 'easy';
     out.print('BREACH shell. Tab completes (twice lists), up/down recalls history, Ctrl+L clears.', 'sys');
     out.print('');
-    for (const c of ALL) out.print(`  ${c.usage.padEnd(30)} ${c.summary}`);
+    const list = scoped ? missionCommands(s.baseMission) : ALL;
+    for (const c of list) out.print(`  ${c.usage.padEnd(30)} ${c.summary}`);
     out.print('');
+    if (scoped) out.print("That's what this job needs. Type 'help all' to see every command on this rig.", 'dim');
     out.print('Password prompts do not echo.', 'dim');
     if (s.config.recoveryHints !== 'none') {
       out.print('At a Password prompt, type ? to start account recovery (security questions), if the host offers it.', 'dim');

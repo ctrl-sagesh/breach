@@ -29,8 +29,6 @@ interface LandingProps {
   onRestored: (restored: RestoreResult) => void;
   onPrivacy: () => void;
   onAbout: () => void;
-  /** Fires once, on the first click or key. Browsers only allow audio after a gesture. */
-  onFirstGesture: () => void;
 }
 
 const INTRO: Line[] = [
@@ -44,7 +42,7 @@ function countdownText(ms: number): string {
   return [Math.floor(total / 3600), Math.floor((total % 3600) / 60), total % 60].map((n) => String(n).padStart(2, '0')).join(':');
 }
 
-export default function Landing({ tier, hasSave, onStart, onContinue, onDaily, dailyStreak, muted, onToggleMute, onRestored, onPrivacy, onAbout, onFirstGesture }: LandingProps) {
+export default function Landing({ tier, hasSave, onStart, onContinue, onDaily, dailyStreak, muted, onToggleMute, onRestored, onPrivacy, onAbout }: LandingProps) {
   const [typed, setTyped] = useState(0);
   const [untilReset, setUntilReset] = useState(msUntilReset());
   useEffect(() => {
@@ -90,24 +88,6 @@ export default function Landing({ tier, hasSave, onStart, onContinue, onDaily, d
     }, 28);
     return () => window.clearInterval(timer);
   }, []);
-
-  // The first gesture anywhere unlocks audio.
-  useEffect(() => {
-    let done = false;
-    const once = () => {
-      if (done) return;
-      done = true;
-      onFirstGesture();
-      window.removeEventListener('pointerdown', once);
-      window.removeEventListener('keydown', once);
-    };
-    window.addEventListener('pointerdown', once);
-    window.addEventListener('keydown', once);
-    return () => {
-      window.removeEventListener('pointerdown', once);
-      window.removeEventListener('keydown', once);
-    };
-  }, [onFirstGesture]);
 
   const submit = (e: FormEvent) => {
     e.preventDefault();

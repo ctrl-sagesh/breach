@@ -21,7 +21,7 @@ import { buildSubmission, getPlayerId, type Submission } from '../lib/leaderboar
 import { debounce, syncSave, type RestoreResult } from '../lib/cloud';
 import { addAttempt, type AttemptRecord, type Outcome } from '../lib/history';
 import { mergeSaves } from '../lib/merge';
-import { summarize } from '../lib/progress';
+import { missionUnlocked, summarize, unlockedTiers } from '../lib/progress';
 import type { DailyStats, ShareFacts } from '../lib/share';
 import Achievements, { AchievementToast } from './Achievements';
 import Boot from './Boot';
@@ -106,11 +106,10 @@ export default function GameApp() {
   const [closing, setClosing] = useState(false);
   const [systemReduce, setSystemReduce] = useState(false);
   const [toast, setToast] = useState<AchievementDef[]>([]);
+  /** Held off until the debrief's own stat count-up finishes, so a toast never covers it mid-animation. */
+  const [toastsReady, setToastsReady] = useState(false);
   const [lastRun, setLastRun] = useState<LastRun | null>(null);
-  const [afterRegister, setAfterRegister] = useState<Screen | null>(null);
   const lastScreen = useRef<Screen['name']>('boot');
-  /** Set on the first-ever win, when there is no handle yet, so the next debrief exit detours through Register. */
-  const firstWinRegister = useRef(false);
   /** The attempt's command log, timed from the moment the session opened. Replayed by the server and the viewer. */
   const run = useRef<{ startedAt: number; commands: RunCommand[]; recorded: boolean }>({ startedAt: 0, commands: [], recorded: false });
   /** Set when a save change came from a sync merge, so the change does not send another sync. */
@@ -219,10 +218,16 @@ export default function GameApp() {
   }, [save.track]);
 
   const onBootDone = useCallback(() => setScreen({ name: 'landing' }), []);
-  // Ambient music starts on the first click or key. Browsers do not allow sound before that.
-  const onFirstGesture = useCallback(() => startMusic(), []);
-  const toMenu = useCallback(() => setScreen({ name: 'menu' }), []);
-  const toDaily = useCallback(() => setScreen({ name: 'daily' }), []);
+  // Music loads and starts the moment the player leaves the landing page for a menu or a mission, never on landing
+  // itself. Each of these is reached from a click, which is the user gesture browsers require before audio can start.
+  const toMenu = useCallback(() => {
+    startMusic();
+    setScreen({ name: 'menu' });
+  }, []);
+  const toDaily = useCallback(() => {
+    startMusic();
+    setScreen({ name: 'daily' });
+  }, []);
 
   const setTier = (next: Tier) => update({ tier: next });
 
@@ -261,6 +266,7 @@ export default function GameApp() {
 
   /** "Start hacking" for a visitor who has never played: straight into job 1 on Easy, briefing printed in the terminal. */
   const quickStartFirstMission = () => {
+    startMusic();
     flushSudo(session);
     const mission = MISSIONS[0];
     setSave((prev) => {
@@ -275,17 +281,6 @@ export default function GameApp() {
     openSession(mission, 'easy', { quickBriefing: true });
     trackMissionStarted('easy', 'campaign');
     setScreen({ name: 'play', index: 0 });
-  };
-
-  /** Where a debrief exit goes, unless this was the first-ever win, which detours through Register first. */
-  const continueAfter = (target: Screen) => {
-    if (firstWinRegister.current) {
-      firstWinRegister.current = false;
-      setAfterRegister(target);
-      setScreen({ name: 'register' });
-      return;
-    }
-    setScreen(target);
   };
 
   /** An attempt that ended without a win (trace, clock or abort) goes into the ops log once. */
@@ -312,6 +307,8 @@ export default function GameApp() {
   };
 
   const beginAttempt = (index: number) => {
+    // Defense in depth: the briefing's tier picker already disables a locked tier, but a stale screen should not start one.
+    if (!missionUnlocked(save, save.tier, index)) return;
     flushSudo(session);
     const mission = MISSIONS[index];
     setSave((prev) => {
@@ -373,10 +370,6 @@ export default function GameApp() {
     const isDaily = Boolean(date);
     trackMissionCleared(s.tier, isDaily ? 'daily' : 'campaign');
 
-    // First win ever, no handle yet: nudge registration once the debrief is done, instead of blocking play with it up front.
-    const everCompleted = Object.values(save.completed).some((t) => Object.keys(t).length > 0);
-    if (!save.nickname && !save.registerSkipped && !everCompleted) firstWinRegister.current = true;
-
     // Next save state, computed once so achievements and the ops log read the same numbers that get saved.
     const tierResults = save.completed[s.tier];
     const best = tierResults[mission.id];
@@ -418,6 +411,7 @@ export default function GameApp() {
     };
     persistSave(next);
     setSave(next);
+    setToastsReady(false);
     if (unlocked.length) setToast(unlocked);
 
     setLastRun({ missionId: mission.id, tier: s.tier, scope: isDaily ? 'daily' : 'campaign', date, commands: [...run.current.commands] });
@@ -502,36 +496,32 @@ export default function GameApp() {
               quickStartFirstMission();
               return;
             }
+            startMusic();
             setScreen(!save.nickname && !save.registerSkipped ? { name: 'register' } : { name: 'menu' });
           }}
-          onContinue={() => setScreen({ name: 'select' })}
+          onContinue={() => {
+            startMusic();
+            setScreen({ name: 'select' });
+          }}
           onDaily={toDaily}
           onPrivacy={() => setScreen({ name: 'privacy', from: 'landing' })}
           onAbout={() => setScreen({ name: 'about', from: 'landing' })}
-          onFirstGesture={onFirstGesture}
         />
       );
       break;
-    case 'register': {
-      const leaveRegister = () => {
-        const target = afterRegister ?? { name: 'menu' as const };
-        setAfterRegister(null);
-        setScreen(target);
-      };
+    case 'register':
       body = (
         <Register
           save={save}
-          celebratory={afterRegister !== null}
           onRegistered={(patch) => update(patch)}
-          onDone={leaveRegister}
+          onDone={toMenu}
           onSkip={() => {
             update({ registerSkipped: true });
-            leaveRegister();
+            toMenu();
           }}
         />
       );
       break;
-    }
     case 'menu':
       body = (
         <MainMenu
@@ -597,6 +587,7 @@ export default function GameApp() {
           tier={save.tier}
           attempts={save.attempts[save.tier][mission.id] ?? 0}
           completed={Boolean(save.completed[save.tier][mission.id])}
+          unlockedTiers={unlockedTiers(save, screen.index)}
           onTier={setTier}
           onAccept={() => beginAttempt(screen.index)}
           onBack={() => setScreen({ name: 'select' })}
@@ -663,6 +654,8 @@ export default function GameApp() {
                 commands: posting.commands,
               }),
             onNickname: (nickname: string) => update({ nickname }),
+            // No handle yet: posting the score also registers it and shows the recovery key, in this one step.
+            registration: save.nickname ? undefined : { playerId: getPlayerId(), save, onRegistered: (patch: Partial<SaveData>) => update(patch) },
           }
         : null;
       body = (
@@ -674,9 +667,10 @@ export default function GameApp() {
           reduceMotion={reduceMotion}
           isLast={!date && index === MISSIONS.length - 1}
           nextLabel={date ? 'Daily menu' : undefined}
-          onNext={() => continueAfter(date ? { name: 'daily' } : { name: 'briefing', index: index + 1 })}
-          onCampaignEnd={() => continueAfter({ name: 'card' })}
-          onMenu={() => continueAfter({ name: 'menu' })}
+          onStatsSettled={() => setToastsReady(true)}
+          onNext={() => setScreen(date ? { name: 'daily' } : { name: 'briefing', index: index + 1 })}
+          onCampaignEnd={() => setScreen({ name: 'card' })}
+          onMenu={toMenu}
           card={realWorldFor(mission)}
           share={share}
           daily={daily}
@@ -710,7 +704,7 @@ export default function GameApp() {
     >
       {body}
       {wipeKey > 0 && !reduceMotion ? <div key={wipeKey} className="wipe" aria-hidden="true" /> : null}
-      <AchievementToast items={toast} onDismiss={() => setToast([])} />
+      <AchievementToast items={toast} active={toastsReady} onDone={() => setToast([])} />
       {save.crt ? (
         <>
           <div className="crt-scanlines" aria-hidden="true" />

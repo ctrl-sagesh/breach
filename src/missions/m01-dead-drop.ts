@@ -22,13 +22,14 @@ const mission: MissionDef = {
     'The next posting has a company name this time.',
   ],
   start: { machine: 'rig', cwd: '/home/ghost' },
+  objective: 'Find the admin login on the NAS, then submit the flag.',
   machines: [
     makeRig([FENWICK_IP], {
       '/home/ghost/job.txt': {
         owner: 'ghost',
         content: `JOB: Fenwick Accounts (${FENWICK_IP})
 Goal: get into the NAS, find the flag, submit it.
-Tools on this rig: scan, connect, ls, cd, cat, login, submit.
+Tools on this rig: nmap, ssh, ls, cd, cat, su, submit.
 Type "help" to see everything.`,
       },
     }),

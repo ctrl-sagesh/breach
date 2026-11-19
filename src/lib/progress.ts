@@ -12,6 +12,11 @@ export function missionUnlocked(save: SaveData, tier: Tier, index: number): bool
   return Boolean(save.completed[tier][MISSIONS[index - 1].id]);
 }
 
+/** Whether a mission is unlocked on each difficulty, for the tier picker on its briefing. */
+export function unlockedTiers(save: SaveData, index: number): Record<Tier, boolean> {
+  return Object.fromEntries(TIERS.map((t) => [t, missionUnlocked(save, t, index)])) as Record<Tier, boolean>;
+}
+
 export interface CampaignSummary {
   tier: Tier;
   completed: number;

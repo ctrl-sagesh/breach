@@ -19,13 +19,11 @@ interface RegisterProps {
   /** Leaves the register screen once the key is saved, or the player is done with it. */
   onDone: () => void;
   onSkip: () => void;
-  /** Shown after a first win, instead of before the player has played anything. */
-  celebratory?: boolean;
 }
 
 type Step = { name: 'handle' } | { name: 'key'; recoveryKey: string; online: boolean } | { name: 'busy' };
 
-export default function Register({ save, onRegistered, onDone, onSkip, celebratory }: RegisterProps) {
+export default function Register({ save, onRegistered, onDone, onSkip }: RegisterProps) {
   const [draft, setDraft] = useState(save.nickname ?? '');
   const [error, setError] = useState<string | null>(null);
   const [step, setStep] = useState<Step>({ name: 'handle' });
@@ -112,11 +110,7 @@ export default function Register({ save, onRegistered, onDone, onSkip, celebrato
   const busy = step.name === 'busy';
   return (
     <Screen>
-      <Header
-        title={celebratory ? "YOU'RE ON THE BOARD" : 'REGISTER YOUR HANDLE'}
-        subtitle={celebratory ? 'Put a name on that result. Register your handle?' : 'Every operator needs a name on the board.'}
-        icon="terminal"
-      />
+      <Header title="REGISTER YOUR HANDLE" subtitle="Every operator needs a name on the board." icon="terminal" />
 
       <form onSubmit={submit} className="mb-6 space-y-4">
         <label className="block">

@@ -10,14 +10,11 @@ import { CANCEL_MARK } from '../engine/replay';
 import { Out, type GameSession } from '../engine/session';
 import type { Line } from '../engine/types';
 import { keyVariantFor, play } from '../lib/audio';
+import { skippable, type Skippable } from '../lib/deferred';
 import { vibrateKey } from '../lib/haptics';
 import type { TypingSpeed } from '../lib/save';
+import { advance, completeAll, toEntries, type Entry } from '../lib/typeout';
 import QuickKeys from './QuickKeys';
-
-interface Entry {
-  line: Line;
-  shown: number;
-}
 
 export interface TerminalProps {
   session: GameSession;
@@ -46,27 +43,6 @@ const KIND_CLASS: Record<Line['kind'], string> = {
   dir: 'kali-dir',
   exec: 'kali-exec',
 };
-
-function toEntries(lines: Line[], speed: TypingSpeed): Entry[] {
-  return lines.map((line) => ({ line, shown: speed === 'instant' ? line.text.length : 0 }));
-}
-
-/** Reveals up to `step` characters of the first unfinished line. Returns the same array when nothing changes. */
-function advance(entries: Entry[], step: number): Entry[] {
-  const idx = entries.findIndex((e) => e.shown < e.line.text.length);
-  if (idx < 0) return entries;
-  const backlog = entries.reduce((n, e) => n + (e.line.text.length - e.shown), 0);
-  const amount = backlog > 400 ? step * 8 : step;
-  const next = entries.slice();
-  const e = entries[idx];
-  next[idx] = { ...e, shown: Math.min(e.line.text.length, e.shown + amount) };
-  return next;
-}
-
-function completeAll(entries: Entry[]): Entry[] {
-  if (entries.every((e) => e.shown >= e.line.text.length)) return entries;
-  return entries.map((e) => ({ ...e, shown: e.line.text.length }));
-}
 
 function Row({ entry }: { entry: Entry }) {
   const { line, shown } = entry;
@@ -129,6 +105,8 @@ export default function Terminal({ session, speed, onUpdate, onQuit, onFlash, on
   const scrollRef = useRef<HTMLDivElement>(null);
   /** The input that last produced an ambiguous tab. A second tab on the same input lists the options. */
   const lastTab = useRef<string | null>(null);
+  /** The guesser's pending result, while a crack command runs. Skipped early so a keystroke is never lost to it. */
+  const crackTimer = useRef<Skippable | null>(null);
 
   // One timer drives the typing effect for the whole terminal. Output is revealed in order.
   useEffect(() => {
@@ -170,10 +148,16 @@ export default function Terminal({ session, speed, onUpdate, onQuit, onFlash, on
     if (out.quit) onQuit();
   };
 
+  /** Finishes any reply still typing out, and any running cracker, right away. Called on every keystroke, so none are lost to an animation. */
+  const skipAnimations = () => {
+    setEntries(completeAll);
+    crackTimer.current?.skip();
+  };
+
   const run = (raw: string) => {
     if (session.finished) return;
+    skipAnimations();
     onCommand?.(raw);
-    setEntries(completeAll);
     setInput('');
     setHistIndex(null);
     const out = session.input(raw);
@@ -181,13 +165,14 @@ export default function Terminal({ session, speed, onUpdate, onQuit, onFlash, on
       // The command echo shows at once. The guesser runs, then the result lands.
       append(out.lines.slice(0, 1), false);
       setGuess(WORDLIST[0]);
-      window.setTimeout(() => {
+      crackTimer.current = skippable(() => {
         setGuess(null);
         const rest = new Out();
         rest.lines.push(...out.lines.slice(1));
         rest.sounds.push(...out.sounds);
         rest.quit = out.quit;
         emit(rest);
+        crackTimer.current = null;
       }, GUESS_MS);
       return;
     }
@@ -227,6 +212,7 @@ export default function Terminal({ session, speed, onUpdate, onQuit, onFlash, on
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+    skipAnimations();
     const key = e.key.toLowerCase();
     if (e.ctrlKey && key === 'l') {
       e.preventDefault();
@@ -296,7 +282,11 @@ export default function Terminal({ session, speed, onUpdate, onQuit, onFlash, on
               ref={inputRef}
               className="term-input"
               value={input}
-              onChange={(e) => setInput(e.target.value)}
+              onChange={(e) => {
+                // Not just onKeyDown: paste and IME input change the value without a plain keydown.
+                skipAnimations();
+                setInput(e.target.value);
+              }}
               onKeyDown={onKeyDown}
               onFocus={() => {
                 const el = scrollRef.current;
@@ -308,7 +298,6 @@ export default function Terminal({ session, speed, onUpdate, onQuit, onFlash, on
               autoCapitalize="off"
               spellCheck={false}
               aria-label="terminal input"
-              disabled={cracking}
               autoFocus
             />
           </form>
@@ -319,14 +308,17 @@ export default function Terminal({ session, speed, onUpdate, onQuit, onFlash, on
           mode={mode}
           onRun={(cmd) => run(cmd)}
           onInsert={(text) => {
+            skipAnimations();
             setInput(text);
             inputRef.current?.focus();
           }}
           onTab={() => {
+            skipAnimations();
             if (mode === 'shell') tab();
             inputRef.current?.focus();
           }}
           onHistory={(dir) => {
+            skipAnimations();
             recall(dir);
             inputRef.current?.focus();
           }}

@@ -1,6 +1,6 @@
 'use client';
 
-import { DIFFICULTY } from '../engine/difficulty';
+import { DIFFICULTY, TIERS } from '../engine/difficulty';
 import type { SaveData } from '../lib/save';
 import { summarize } from '../lib/progress';
 import Icon, { type IconName } from './Icon';
@@ -80,8 +80,8 @@ export default function MainMenu({ save, onNavigate }: MainMenuProps) {
       <div className="panel mt-4 grid grid-cols-3 gap-2 p-2 text-xs">
         <div>
           <div className="text-[var(--dim)]">JOBS</div>
-          <div className="glow text-sm">
-            {summary.completed}/{summary.total}
+          <div className="glow text-sm tabular-nums">
+            {TIERS.map((t) => `${DIFFICULTY[t].label[0]} ${summarize(save, t).completed}/${summarize(save, t).total}`).join(' · ')}
           </div>
         </div>
         <div>

@@ -3,32 +3,49 @@
 // Achievement UI: the toast that pops when something unlocks (with a chime), and the achievements screen.
 // Hidden achievements stay as question marks until they are earned.
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { play } from '../lib/audio';
 import { ACHIEVEMENTS, type AchievementDef } from '../lib/achievements';
 import Icon from './Icon';
 import { Header, Screen } from './ui';
 
-export function AchievementToast({ items, onDismiss }: { items: AchievementDef[]; onDismiss: () => void }) {
-  useEffect(() => {
-    if (items.length === 0) return;
-    play('achievement');
-    const t = window.setTimeout(onDismiss, 3800);
-    return () => window.clearTimeout(t);
-  }, [items, onDismiss]);
+const TOAST_MS = 3200;
 
-  if (items.length === 0) return null;
+/**
+ * Queues unlocked achievements one at a time, in a corner so they never sit over the score panel.
+ * Stays empty until `active` (the debrief holds it off until its own stat count-up is done), then
+ * shows the queue one card at a time and calls `onDone` once it has worked through all of them.
+ */
+export function AchievementToast({ items, active, onDone }: { items: AchievementDef[]; active: boolean; onDone: () => void }) {
+  const [index, setIndex] = useState(0);
+
+  useEffect(() => {
+    setIndex(0);
+  }, [items]);
+
+  const current = active && index < items.length ? items[index] : null;
+
+  useEffect(() => {
+    if (!current) return;
+    play('achievement');
+    const t = window.setTimeout(() => setIndex((i) => i + 1), TOAST_MS);
+    return () => window.clearTimeout(t);
+  }, [current]);
+
+  useEffect(() => {
+    if (active && items.length > 0 && index >= items.length) onDone();
+  }, [active, items.length, index, onDone]);
+
+  if (!current) return null;
   return (
-    <div className="fixed inset-x-0 top-3 z-[70] flex flex-col items-center gap-2 px-4" role="status" aria-live="polite">
-      {items.map((a) => (
-        <button key={a.id} type="button" onClick={onDismiss} className="panel flex w-full max-w-sm items-center gap-3 p-3 text-left text-sm">
-          <Icon name={a.icon} size={22} />
-          <span>
-            <span className="block text-xs tracking-[0.25em] text-[var(--dim)]">ACHIEVEMENT UNLOCKED</span>
-            <span className="glow font-semibold">{a.title}</span>
-          </span>
-        </button>
-      ))}
+    <div className="fixed bottom-3 right-3 z-[70] max-w-[min(90vw,20rem)]" role="status" aria-live="polite">
+      <button type="button" onClick={() => setIndex((i) => i + 1)} className="panel flex w-full items-center gap-3 p-3 text-left text-sm">
+        <Icon name={current.icon} size={22} />
+        <span>
+          <span className="block text-xs tracking-[0.25em] text-[var(--dim)]">ACHIEVEMENT UNLOCKED</span>
+          <span className="glow font-semibold">{current.title}</span>
+        </span>
+      </button>
     </div>
   );
 }

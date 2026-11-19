@@ -17,6 +17,7 @@ import type { DailyStats, ShareFacts } from '../lib/share';
 import type { Submission } from '../lib/leaderboard';
 import { buildFeedbackMailto } from '../lib/feedback';
 import { GAME_VERSION } from '../lib/version';
+import type { SaveData } from '../lib/save';
 
 interface DebriefProps {
   mission: MissionDef;
@@ -29,12 +30,19 @@ interface DebriefProps {
   onCampaignEnd: () => void;
   onMenu: () => void;
   nextLabel?: string;
+  /** Fires once the stat count-up lands, so an achievement toast can wait for it instead of covering the panel mid-count. */
+  onStatsSettled?: () => void;
   card: Card | null;
   share: ShareFacts;
   /** Set for a daily: switches ShareBar to the copyable emoji-row result, image card second. */
   daily?: DailyStats;
   fileName: string;
-  board: { nickname?: string; build: (nickname: string) => Submission; onNickname: (nickname: string) => void } | null;
+  board: {
+    nickname?: string;
+    build: (nickname: string) => Submission;
+    onNickname: (nickname: string) => void;
+    registration?: { playerId: string; save: SaveData; onRegistered: (patch: Partial<SaveData>) => void };
+  } | null;
 }
 
 const COUNT_FRAMES = 18;
@@ -53,7 +61,7 @@ function revealed(paras: string[], n: number): string[] {
   });
 }
 
-export default function Debrief({ mission, result, hintLimit, rankName, reduceMotion, isLast, nextLabel, onNext, onCampaignEnd, onMenu, card, share, daily, fileName, board }: DebriefProps) {
+export default function Debrief({ mission, result, hintLimit, rankName, reduceMotion, isLast, nextLabel, onStatsSettled, onNext, onCampaignEnd, onMenu, card, share, daily, fileName, board }: DebriefProps) {
   const ending = mission.endings?.find((e) => e.id === result.endingId);
   const story = paragraphs(mission.debrief);
   const storyLength = story.reduce((n, p) => n + p.length, 0);
@@ -91,6 +99,13 @@ export default function Debrief({ mission, result, hintLimit, rankName, reduceMo
     }, 28);
     return () => window.clearTimeout(t);
   }, [statIndex, statValue, reduceMotion]);
+
+  // Tell the parent the count-up landed, once, so a queued achievement toast can start.
+  useEffect(() => {
+    if (statIndex >= stats.length) onStatsSettled?.();
+    // Fires once stats finish counting; onStatsSettled and stats.length are not triggers of their own.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [statIndex]);
 
   // Stamp the rank once every stat has landed.
   useEffect(() => {
@@ -155,7 +170,7 @@ export default function Debrief({ mission, result, hintLimit, rankName, reduceMo
 
       {storyDone && card ? <RealWorldCard card={card} /> : null}
 
-      {storyDone && board ? <BoardPanel nickname={board.nickname} build={board.build} onNickname={board.onNickname} /> : null}
+      {storyDone && board ? <BoardPanel nickname={board.nickname} build={board.build} onNickname={board.onNickname} registration={board.registration} /> : null}
 
       {storyDone ? (
         <div className="mb-6">
