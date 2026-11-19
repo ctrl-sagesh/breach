@@ -18,6 +18,27 @@ function humanRun(tier: Tier, steps: string[] = MISSION.kaliSolution): RunLog {
   };
 }
 
+/** A small, deterministic PRNG, so a "random" gap is reproducible across runs. */
+function seededRand(seed: number): () => number {
+  let s = seed;
+  return () => {
+    s = (s * 1103515245 + 12345) & 0x7fffffff;
+    return s / 0x7fffffff;
+  };
+}
+
+/** A fast, confident player who already knows the mission: real keystrokes, 300-600ms apart, no reading pauses. */
+function fastHumanRun(tier: Tier, steps: string[] = MISSION.kaliSolution): RunLog {
+  const rand = seededRand(7);
+  let t = 0;
+  const commands = steps.map((cmd) => {
+    const row = { t, cmd };
+    t += 300 + Math.round(rand() * 300);
+    return row;
+  });
+  return { missionId: MISSION.id, tier, commands };
+}
+
 describe('replay validator: legitimate runs', () => {
   it.each(TIERS)('accepts the walkthrough on %s and computes the score itself', (tier) => {
     const r = validateRun(humanRun(tier), MISSIONS);
@@ -34,6 +55,11 @@ describe('replay validator: legitimate runs', () => {
     expect(first.ok).toBe(true);
     if (!first.ok) return;
     expect(validateRun({ ...humanRun('medium'), claimedScore: first.score }, MISSIONS).ok).toBe(true);
+  });
+
+  it.each(TIERS)('accepts a fast human on %s: real commands 300-600ms apart, no reading pauses', (tier) => {
+    const r = validateRun(fastHumanRun(tier), MISSIONS);
+    expect(r.ok, !r.ok ? r.reason : undefined).toBe(true);
   });
 
   it('reports whether aliases were used, for achievements', () => {

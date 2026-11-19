@@ -1931,8 +1931,12 @@ var RUN_LIMITS = {
   maxCommandLength: 300,
   /** Two commands cannot land closer together than this. Faster than a person can type or paste one by one. */
   minGapMs: 120,
-  /** Averaged over the whole run. Typing and reading a walkthrough takes longer than a script needs. */
-  minAverageMs: 500
+  /**
+   * Averaged over the whole run. A fast player who already knows a mission can clear 300-600ms a command
+   * with no reading time at all, so this sits well under that, not at a "typical" human pace: it exists to
+   * catch a script whose gaps sit just above minGapMs on every single command, not to second-guess a quick player.
+   */
+  minAverageMs: 200
 };
 var fail = (reason) => ({ ok: false, reason });
 function validateRun(run, missions) {
