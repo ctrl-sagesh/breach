@@ -19,7 +19,7 @@ interface MissionScreenProps {
   onWon: (session: GameSession) => void;
   onRetry: () => void;
   onAbort: () => void;
-  onCommand?: (raw: string) => void;
+  onCommand?: (raw: string, bs: number) => void;
   /** Called once when the attempt fails, by trace or by the clock. */
   onFailed?: (session: GameSession) => void;
 }

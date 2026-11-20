@@ -162,6 +162,11 @@ export interface MissionDef {
   kaliSolution: string[];
   /** The Friday daily variant: no hints, trace at least as fast as hard tier, every decoy present. */
   hardFriday?: boolean;
+  /**
+   * False only for a mission whose flag can't be swapped in after the fact: it's reconstructed by the player
+   * from a fragment, or only ever stored transformed (rot13, etc). Defaults to true. See src/lib/variation.ts.
+   */
+  varyFlag?: boolean;
 }
 
 export type Tier = 'easy' | 'medium' | 'hard';

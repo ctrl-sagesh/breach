@@ -94,6 +94,9 @@ The vault note is the thing I want. It is in the service account's home.`,
     },
   ],
   flag: FLAG,
+  // The flag is only ever stored rot13-transformed (VAULT_NOTE above), so a per-run flag swap would desync
+  // from what the player actually decodes. See src/lib/variation.ts.
+  varyFlag: false,
   hints: [
     'The app config has a database password, but it is wrapped. Read the config first and look at the field name.',
     'password_b64 says what kind of wrapping it is. decode it with the right encoding, then login svc with the result.',

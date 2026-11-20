@@ -2,7 +2,16 @@
 // impossible sequences are rejected. The score always comes from the replay.
 
 import { describe, expect, it } from 'vitest';
-import { validateRun, type RunCommand, type RunLog } from '../src/engine/replay';
+import {
+  checkToken,
+  suspicionFor,
+  validateRun,
+  SUSPICION_HIDE_THRESHOLD,
+  TOKEN_TOLERANCE_MS,
+  type RunCommand,
+  type RunLog,
+  type TokenRow,
+} from '../src/engine/replay';
 import { TIERS } from '../src/engine/difficulty';
 import { MISSIONS } from '../src/missions';
 import type { Tier } from '../src/engine/types';
@@ -147,5 +156,94 @@ describe('replay validator: incomplete and impossible runs', () => {
     const steps = [...MISSION.kaliSolution];
     steps[1] = 'echo ' + 'x'.repeat(400);
     expect(validateRun(humanRun('medium', steps), MISSIONS).ok).toBe(false);
+  });
+
+  it('counts commands that produced an error-kind line, for suspicion scoring', () => {
+    const steps = ['bogus-command', ...MISSION.kaliSolution];
+    const r = validateRun(humanRun('medium', steps), MISSIONS);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.errorCommands).toBe(1);
+  });
+});
+
+describe('run tokens: checkToken', () => {
+  const claim = { playerId: 'p1', missionId: MISSION.id, tier: 'medium' as Tier, scope: 'campaign' as const };
+
+  function baseToken(overrides: Partial<TokenRow> = {}): TokenRow {
+    return {
+      playerId: 'p1',
+      missionId: MISSION.id,
+      tier: 'medium',
+      scope: 'campaign',
+      date: null,
+      startedAt: 0,
+      usedAt: null,
+      expiresAt: 1000 * 60 * 60 * 3,
+      ...overrides,
+    };
+  }
+
+  it('accepts a fresh, matching, unused token once enough server-side time has passed', () => {
+    expect(checkToken(baseToken(), claim, 5000, 10_000).ok).toBe(true);
+  });
+
+  it('rejects an already-used token', () => {
+    expect(checkToken(baseToken({ usedAt: 1 }), claim, 5000, 10_000).ok).toBe(false);
+  });
+
+  it('rejects an expired token', () => {
+    expect(checkToken(baseToken({ expiresAt: 100 }), claim, 5000, 10_000).ok).toBe(false);
+  });
+
+  it('rejects a token issued for a different player, mission, tier or scope/date', () => {
+    expect(checkToken(baseToken({ playerId: 'other' }), claim, 5000, 10_000).ok).toBe(false);
+    expect(checkToken(baseToken({ missionId: 'other' }), claim, 5000, 10_000).ok).toBe(false);
+    expect(checkToken(baseToken({ tier: 'hard' }), claim, 5000, 10_000).ok).toBe(false);
+    expect(checkToken(baseToken({ scope: 'daily', date: '2026-01-01' }), claim, 5000, 10_000).ok).toBe(false);
+  });
+
+  it('rejects when the server saw less time pass than the run claims, beyond the tolerance', () => {
+    const lastCommandMs = 60_000;
+    const nowMs = lastCommandMs - TOKEN_TOLERANCE_MS - 1;
+    expect(checkToken(baseToken(), claim, lastCommandMs, nowMs).ok).toBe(false);
+  });
+
+  it('allows a claimed duration inside the tolerance window', () => {
+    const lastCommandMs = 60_000;
+    const nowMs = lastCommandMs - TOKEN_TOLERANCE_MS + 100;
+    expect(checkToken(baseToken(), claim, lastCommandMs, nowMs).ok).toBe(true);
+  });
+});
+
+describe('suspicion scoring: suspicionFor', () => {
+  it('flags a run with suspiciously regular timing, no corrections and no mistakes', () => {
+    const commands: RunCommand[] = MISSION.kaliSolution.map((cmd, i) => ({ t: i * 500, cmd, bs: 0 }));
+    const run: RunLog = { missionId: MISSION.id, tier: 'medium', commands };
+    const result = validateRun(run, MISSIONS);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const suspicion = suspicionFor(run, result);
+    expect(suspicion.score).toBeGreaterThanOrEqual(SUSPICION_HIDE_THRESHOLD);
+    expect(suspicion.reasons.length).toBeGreaterThan(0);
+  });
+
+  it('does not flag a normal, slightly imperfect human run', () => {
+    const human = fastHumanRun('medium');
+    const commands: RunCommand[] = human.commands.map((c, i) => ({ ...c, bs: i % 3 === 0 ? 1 : 0 }));
+    const run: RunLog = { ...human, commands };
+    const result = validateRun(run, MISSIONS);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const suspicion = suspicionFor(run, result);
+    expect(suspicion.score).toBeLessThan(SUSPICION_HIDE_THRESHOLD);
+  });
+
+  it('never flags a short run: the signals need enough commands to mean anything', () => {
+    const commands: RunCommand[] = MISSION.solution.slice(0, 3).map((cmd, i) => ({ t: i * 500, cmd, bs: 0 }));
+    const run: RunLog = { missionId: MISSION.id, tier: 'medium', commands };
+    // This run doesn't finish, but suspicionFor only looks at commands/result shape, not completion.
+    const fakeResult = { ok: true as const, score: 500, points: 500, seconds: 10, trace: 0, hints: 0, endingId: null, usedAliases: false, usedPipe: false, errorCommands: 0 };
+    expect(suspicionFor(run, fakeResult).score).toBe(0);
   });
 });

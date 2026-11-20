@@ -17,7 +17,8 @@ import { campaignDone, factsFromWin, newlyUnlocked, type AchievementDef } from '
 import { dailyMission, dailyNumber, isHardFriday, streakFor, utcDate } from '../lib/daily';
 import { realWorldFor } from '../lib/realworld';
 import { trackDailyPlayed, trackMissionCleared, trackMissionStarted, trackMissionTraced, trackRestoreUsed } from '../lib/analytics';
-import { buildSubmission, getPlayerId, type Submission } from '../lib/leaderboard';
+import { buildSubmission, getPlayerId, leaderboardConfigured, startRun, type Submission } from '../lib/leaderboard';
+import { applyFlagVariation } from '../lib/variation';
 import { debounce, syncSave, type RestoreResult } from '../lib/cloud';
 import { addAttempt, type AttemptRecord, type Outcome } from '../lib/history';
 import { mergeSaves } from '../lib/merge';
@@ -76,6 +77,8 @@ interface LastRun {
   scope: 'campaign' | 'daily';
   date?: string;
   commands: RunCommand[];
+  /** The run token this attempt was started with, if any. Unset means it can only be saved locally. */
+  token?: string;
 }
 
 function missionFor(index: number, date?: string): MissionDef {
@@ -111,7 +114,12 @@ export default function GameApp() {
   const [lastRun, setLastRun] = useState<LastRun | null>(null);
   const lastScreen = useRef<Screen['name']>('boot');
   /** The attempt's command log, timed from the moment the session opened. Replayed by the server and the viewer. */
-  const run = useRef<{ startedAt: number; commands: RunCommand[]; recorded: boolean }>({ startedAt: 0, commands: [], recorded: false });
+  const run = useRef<{ startedAt: number; commands: RunCommand[]; recorded: boolean; token: string | null }>({
+    startedAt: 0,
+    commands: [],
+    recorded: false,
+    token: null,
+  });
   /** Set when a save change came from a sync merge, so the change does not send another sync. */
   const fromSync = useRef(false);
 
@@ -256,12 +264,37 @@ export default function GameApp() {
     });
   };
 
-  const openSession = (mission: MissionDef, sessionTier: Tier, opts?: { quickBriefing?: boolean }) => {
-    run.current = { startedAt: Date.now(), commands: [], recorded: false };
-    const s = new GameSession(mission, { tier: sessionTier, quickBriefing: opts?.quickBriefing });
-    setSession(s);
+  /**
+   * Opens a new attempt. When the leaderboard is reachable, this first asks the server for a run token (which
+   * carries the seed that varies the flag for this attempt) before building the session, so the player and the
+   * server are always looking at the same mission. A run started without a token (offline, or the request timed
+   * out) still plays normally on the unvaried mission; it just can't be posted later (see submitRun).
+   */
+  const openSession = (mission: MissionDef, sessionTier: Tier, opts?: { quickBriefing?: boolean; scope?: 'campaign' | 'daily'; date?: string }) => {
+    const scope = opts?.scope ?? 'campaign';
+    const thisRun: { startedAt: number; commands: RunCommand[]; recorded: boolean; token: string | null } = {
+      startedAt: Date.now(),
+      commands: [],
+      recorded: false,
+      token: null,
+    };
+    run.current = thisRun;
+    setSession(null);
     setAttemptKey((k) => k + 1);
-    return s;
+    void (async () => {
+      let finalMission = mission;
+      if (leaderboardConfigured()) {
+        const started = await startRun({ playerId: getPlayerId(), missionId: mission.id, tier: sessionTier, scope, date: opts?.date });
+        // A newer attempt may have started while this was in flight; don't resurrect a stale one.
+        if (run.current !== thisRun) return;
+        if (started) {
+          thisRun.token = started.token;
+          finalMission = applyFlagVariation(mission, started.seed);
+        }
+      }
+      if (run.current !== thisRun) return;
+      setSession(new GameSession(finalMission, { tier: sessionTier, quickBriefing: opts?.quickBriefing }));
+    })();
   };
 
   /** "Start hacking" for a visitor who has never played: straight into job 1 on Easy, briefing printed in the terminal. */
@@ -343,14 +376,14 @@ export default function GameApp() {
       persistSave(next);
       return next;
     });
-    openSession(mission, save.tier);
+    openSession(mission, save.tier, { scope: 'daily', date });
     trackMissionStarted(save.tier, 'daily');
     trackDailyPlayed(save.tier);
     setScreen({ name: 'play', index: -1, date });
   };
 
-  const onCommand = useCallback((raw: string) => {
-    run.current.commands.push({ t: Math.max(0, Date.now() - run.current.startedAt), cmd: raw });
+  const onCommand = useCallback((raw: string, bs: number) => {
+    run.current.commands.push({ t: Math.max(0, Date.now() - run.current.startedAt), cmd: raw, bs });
   }, []);
 
   const onWon = (index: number, s: GameSession, date?: string) => {
@@ -414,7 +447,14 @@ export default function GameApp() {
     setToastsReady(false);
     if (unlocked.length) setToast(unlocked);
 
-    setLastRun({ missionId: mission.id, tier: s.tier, scope: isDaily ? 'daily' : 'campaign', date, commands: [...run.current.commands] });
+    setLastRun({
+      missionId: mission.id,
+      tier: s.tier,
+      scope: isDaily ? 'daily' : 'campaign',
+      date,
+      commands: [...run.current.commands],
+      token: run.current.token ?? undefined,
+    });
     setSession(null);
     setScreen({ name: 'transfer', index, result, date });
   };
@@ -596,7 +636,10 @@ export default function GameApp() {
       break;
     }
     case 'play': {
-      if (!session) break;
+      if (!session) {
+        body = <p className="p-6 text-sm text-[var(--dim)]">Booting session...</p>;
+        break;
+      }
       const index = screen.index;
       const date = screen.date;
       const mission = missionFor(index, date);
@@ -652,6 +695,7 @@ export default function GameApp() {
                 missionId: posting.missionId,
                 tier: posting.tier,
                 commands: posting.commands,
+                token: posting.token,
               }),
             onNickname: (nickname: string) => update({ nickname }),
             // No handle yet: posting the score also registers it and shows the recovery key, in this one step.

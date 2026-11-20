@@ -9,6 +9,8 @@ import type { RunCommand, RunLog } from '../engine/replay';
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL ?? '';
 const PUBLISHABLE_KEY = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ?? '';
 const TIMEOUT_MS = 8000;
+/** Starting a run happens before the player can do anything, so it fails closed to "offline" quickly. */
+const START_TIMEOUT_MS = 3000;
 const PLAYER_KEY = 'breach.player';
 
 export function leaderboardConfigured(): boolean {
@@ -49,13 +51,23 @@ export interface Submission {
 }
 
 /** Builds the request body from a finished attempt's command log. Pure, so tests can check exactly what leaves the browser. */
-export function buildSubmission(input: { playerId: string; nickname: string; scope: 'campaign' | 'daily'; date?: string; missionId: string; tier: Tier; commands: RunCommand[] }): Submission {
+export function buildSubmission(input: {
+  playerId: string;
+  nickname: string;
+  scope: 'campaign' | 'daily';
+  date?: string;
+  missionId: string;
+  tier: Tier;
+  commands: RunCommand[];
+  /** The token this attempt was started with, if any. Omitted when the run can't be posted (see submitRun). */
+  token?: string;
+}): Submission {
   return {
     playerId: input.playerId,
     nickname: input.nickname,
     scope: input.scope,
     date: input.date,
-    run: { missionId: input.missionId, tier: input.tier, commands: input.commands.map((c) => ({ t: c.t, cmd: c.cmd })) },
+    run: { missionId: input.missionId, tier: input.tier, commands: input.commands.map((c) => ({ t: c.t, cmd: c.cmd, bs: c.bs })), token: input.token },
   };
 }
 
@@ -64,9 +76,9 @@ export type SubmitResult =
   | { status: 'rejected'; reason: string }
   | { status: 'offline'; reason: string };
 
-async function withTimeout(url: string, init: RequestInit): Promise<Response> {
+async function withTimeout(url: string, init: RequestInit, ms = TIMEOUT_MS): Promise<Response> {
   const controller = new AbortController();
-  const timer = window.setTimeout(() => controller.abort(), TIMEOUT_MS);
+  const timer = window.setTimeout(() => controller.abort(), ms);
   try {
     return await fetch(url, { ...init, signal: controller.signal });
   } finally {
@@ -78,9 +90,36 @@ function headers(): Record<string, string> {
   return { apikey: PUBLISHABLE_KEY, 'content-type': 'application/json' };
 }
 
+export interface StartedRun {
+  token: string;
+  seed: number;
+}
+
+/**
+ * Asks the server for a run token before an attempt begins. The token pins a server-side start time and a
+ * per-run seed (for flag variation). Returns null on any failure, timeout, or when the board isn't configured —
+ * never throws. A run started without a token still plays normally; it just can't be posted (see submitRun).
+ */
+export async function startRun(input: { playerId: string; missionId: string; tier: Tier; scope: 'campaign' | 'daily'; date?: string }): Promise<StartedRun | null> {
+  if (!leaderboardConfigured()) return null;
+  try {
+    const res = await withTimeout(
+      `${SUPABASE_URL}/functions/v1/submit-run`,
+      { method: 'POST', headers: headers(), body: JSON.stringify({ action: 'start', ...input }) },
+      START_TIMEOUT_MS,
+    );
+    const body = (await res.json()) as { ok: boolean; token?: string; seed?: number };
+    if (!body.ok || !body.token || typeof body.seed !== 'number') return null;
+    return { token: body.token, seed: body.seed };
+  } catch {
+    return null;
+  }
+}
+
 /** Sends a finished run for checking. Returns what the server decided. */
 export async function submitRun(sub: Submission): Promise<SubmitResult> {
   if (!leaderboardConfigured()) return { status: 'offline', reason: 'The global board is not set up on this build.' };
+  if (!sub.run.token) return { status: 'offline', reason: 'This run has no verification token, so it can only be saved on this device.' };
   try {
     const res = await withTimeout(`${SUPABASE_URL}/functions/v1/submit-run`, {
       method: 'POST',

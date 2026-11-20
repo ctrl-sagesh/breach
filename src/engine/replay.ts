@@ -15,6 +15,8 @@ export interface RunCommand {
   /** Milliseconds since the attempt started. Must be whole, non-decreasing. */
   t: number;
   cmd: string;
+  /** Backspace/delete keystrokes typed while composing this line. Used only as a soft suspicion signal. */
+  bs?: number;
 }
 
 export interface RunLog {
@@ -23,10 +25,24 @@ export interface RunLog {
   commands: RunCommand[];
   /** Optional. If the client sends one, it must match the replayed score exactly, or the run is rejected. */
   claimedScore?: number;
+  /** The server-issued run token this attempt was started with. Required to post a run; see checkToken. */
+  token?: string;
 }
 
 export type ReplayResult =
-  | { ok: true; score: number; points: number; seconds: number; trace: number; hints: number; endingId: string | null; usedAliases: boolean; usedPipe: boolean }
+  | {
+      ok: true;
+      score: number;
+      points: number;
+      seconds: number;
+      trace: number;
+      hints: number;
+      endingId: string | null;
+      usedAliases: boolean;
+      usedPipe: boolean;
+      /** How many commands produced an error-kind line. A soft suspicion signal: see suspicionFor. */
+      errorCommands: number;
+    }
   | { ok: false; reason: string };
 
 export const RUN_LIMITS = {
@@ -65,12 +81,19 @@ export function validateRun(run: RunLog, missions: readonly MissionDef[]): Repla
 
   // The engine's clock is driven by the log, so the replay sees the same times the player did.
   let clock = 0;
+  let errorCommands = 0;
   const session = new GameSession(mission, { tier: run.tier, now: () => clock });
   for (const c of run.commands) {
     if (session.finished) return fail('commands after the attempt ended');
     clock = c.t;
-    if (c.cmd === CANCEL_MARK) session.cancelPending(new Out());
-    else session.input(c.cmd);
+    let out: Out;
+    if (c.cmd === CANCEL_MARK) {
+      out = new Out();
+      session.cancelPending(out);
+    } else {
+      out = session.input(c.cmd);
+    }
+    if (out.lines.some((l) => l.kind === 'err')) errorCommands++;
   }
 
   if (session.status === 'failed') return fail(session.failReason === 'time' ? 'the clock ran out' : 'trace reached 100%');
@@ -90,7 +113,94 @@ export function validateRun(run: RunLog, missions: readonly MissionDef[]): Repla
     endingId: session.endingId,
     usedAliases: session.usedAliases,
     usedPipe: session.usedPipe,
+    errorCommands,
   };
+}
+
+/** The server's side of a run-token check. Hard rejects only — see RUN_LIMITS for the pre-existing timing checks. */
+export interface TokenRow {
+  playerId: string;
+  missionId: string;
+  tier: Tier;
+  scope: 'campaign' | 'daily';
+  /** The daily's UTC date, or null for a campaign token. */
+  date: string | null;
+  /** Epoch ms when the server issued the token. */
+  startedAt: number;
+  /** Epoch ms when the token was consumed, or null if unused. */
+  usedAt: number | null;
+  /** Epoch ms when the token stops being valid. */
+  expiresAt: number;
+}
+
+export interface TokenClaim {
+  playerId: string;
+  missionId: string;
+  tier: Tier;
+  scope: 'campaign' | 'daily';
+  date?: string;
+}
+
+/** Clock skew and request latency allowance for the server-elapsed-vs-claimed-duration check. */
+export const TOKEN_TOLERANCE_MS = 5000;
+
+/**
+ * Checks a run token against the run it's being used to post. `lastCommandMs` is the run's own claimed
+ * duration (the last command's `t`). `nowMs` is the server's clock at submit time. Every failure here is a
+ * hard reject: a missing, reused, expired, mismatched or physically-impossible token.
+ */
+export function checkToken(token: TokenRow, claim: TokenClaim, lastCommandMs: number, nowMs: number): { ok: true } | { ok: false; reason: string } {
+  if (token.usedAt !== null) return { ok: false, reason: 'that run token has already been used' };
+  if (nowMs > token.expiresAt) return { ok: false, reason: 'that run token has expired' };
+  if (token.playerId !== claim.playerId) return { ok: false, reason: 'that run token belongs to a different player' };
+  if (token.missionId !== claim.missionId || token.tier !== claim.tier) return { ok: false, reason: 'that run token was issued for a different mission' };
+  if (token.scope !== claim.scope || (token.date ?? undefined) !== claim.date) return { ok: false, reason: 'that run token was issued for a different attempt' };
+  const serverElapsed = nowMs - token.startedAt;
+  if (serverElapsed < lastCommandMs - TOKEN_TOLERANCE_MS) return { ok: false, reason: 'impossible timing: the server saw less time pass than the run claims' };
+  return { ok: true };
+}
+
+/** A run is hidden from the public board (but kept, and still visible to its own player) at or above this suspicion. */
+export const SUSPICION_HIDE_THRESHOLD = 70; // keep in sync with the RLS policy in the run_tokens migration
+
+export interface SuspicionResult {
+  score: number;
+  reasons: string[];
+}
+
+/** Below this many commands, timing/correction signals are too noisy to mean anything. */
+const SUSPICION_MIN_COMMANDS = 8;
+
+/**
+ * Soft signals only: never a reason to reject a run, only to keep it off the public top 10 pending review.
+ * A legitimate, skilled, fast player can trip one of these; the score and reasons are there so a human can
+ * look at the run (see the flagged_runs view) and clear it.
+ */
+export function suspicionFor(run: RunLog, result: Extract<ReplayResult, { ok: true }>): SuspicionResult {
+  const reasons: string[] = [];
+  let score = 0;
+  const commands = run.commands;
+  if (commands.length >= SUSPICION_MIN_COMMANDS) {
+    const gaps: number[] = [];
+    for (let i = 1; i < commands.length; i++) gaps.push(commands[i].t - commands[i - 1].t);
+    const mean = gaps.reduce((a, b) => a + b, 0) / gaps.length;
+    const variance = gaps.reduce((a, b) => a + (b - mean) ** 2, 0) / gaps.length;
+    if (mean > 0 && Math.sqrt(variance) / mean < 0.15) {
+      score += 40;
+      reasons.push('unusually regular timing between commands');
+    }
+
+    if (commands.every((c) => (c.bs ?? 0) === 0)) {
+      score += 25;
+      reasons.push('no corrections typed in the whole run');
+    }
+
+    if (result.errorCommands === 0) {
+      score += 15;
+      reasons.push('no mistyped or rejected commands in the whole run');
+    }
+  }
+  return { score: Math.min(100, score), reasons };
 }
 
 export interface TimelineStep {

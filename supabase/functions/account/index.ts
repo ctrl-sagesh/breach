@@ -62,6 +62,24 @@ async function logFailedWrite(label: string, res: Response): Promise<void> {
   console.error(`account: ${label} failed: ${res.status} ${text}`);
 }
 
+/** Inserts and deletes one throwaway row, proving the database can still write. Never touches accounts or saves. */
+async function health(): Promise<{ ok: boolean; reason?: string }> {
+  const created = await rest('health_check', { method: 'POST', body: JSON.stringify({}) });
+  if (!created.ok) {
+    await logFailedWrite('health insert', created);
+    return { ok: false, reason: 'insert failed' };
+  }
+  const rows = (await created.json()) as { id: number }[];
+  const id = rows[0]?.id;
+  if (id === undefined) return { ok: false, reason: 'insert returned no row' };
+  const deleted = await rest(`health_check?id=eq.${id}`, { method: 'DELETE' });
+  if (!deleted.ok) {
+    await logFailedWrite('health delete', deleted);
+    return { ok: false, reason: 'delete failed' };
+  }
+  return { ok: true };
+}
+
 /** Counts an attempt in a bucket. Returns false when the bucket is over its limit. Refused attempts still count. */
 async function allow(bucket: string, opts: { windowMs: number; max: number }): Promise<boolean> {
   const rows = (await (await rest(`auth_attempts?bucket=eq.${encodeURIComponent(bucket)}&select=*`)).json()) as { window_start: string; hits: number }[];
@@ -206,6 +224,11 @@ Deno.serve(async (req) => {
           return json({ ok: false, reason: 'could not rename' }, 502);
         }
         return json({ ok: true, nickname });
+      }
+
+      case 'health': {
+        const result = await health();
+        return json(result, result.ok ? 200 : 500);
       }
 
       default:

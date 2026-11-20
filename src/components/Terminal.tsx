@@ -22,8 +22,12 @@ export interface TerminalProps {
   onUpdate: () => void;
   onQuit: () => void;
   onFlash: (kind: 'granted' | 'denied') => void;
-  /** Every line the player sends, in order, with Ctrl+C at a question logged as CANCEL_MARK. Feeds the replay. */
-  onCommand?: (raw: string) => void;
+  /**
+   * Every line the player sends, in order, with Ctrl+C at a question logged as CANCEL_MARK. Feeds the replay.
+   * `bs` is how many Backspace/Delete keystrokes were typed while composing that line (a suspicion signal; see
+   * engine/replay.ts's suspicionFor). Reset to 0 after each call.
+   */
+  onCommand?: (raw: string, bs: number) => void;
 }
 
 /** Commands that run a password attack. They show the guesser for a moment before the result. */
@@ -107,6 +111,8 @@ export default function Terminal({ session, speed, onUpdate, onQuit, onFlash, on
   const lastTab = useRef<string | null>(null);
   /** The guesser's pending result, while a crack command runs. Skipped early so a keystroke is never lost to it. */
   const crackTimer = useRef<Skippable | null>(null);
+  /** Backspace/delete keystrokes typed since the last command was sent. A soft suspicion signal; see TerminalProps. */
+  const bsCount = useRef(0);
 
   // One timer drives the typing effect for the whole terminal. Output is revealed in order.
   useEffect(() => {
@@ -157,7 +163,8 @@ export default function Terminal({ session, speed, onUpdate, onQuit, onFlash, on
   const run = (raw: string) => {
     if (session.finished) return;
     skipAnimations();
-    onCommand?.(raw);
+    onCommand?.(raw, bsCount.current);
+    bsCount.current = 0;
     setInput('');
     setHistIndex(null);
     const out = session.input(raw);
@@ -213,6 +220,7 @@ export default function Terminal({ session, speed, onUpdate, onQuit, onFlash, on
 
   const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
     skipAnimations();
+    if (e.key === 'Backspace' || e.key === 'Delete') bsCount.current++;
     const key = e.key.toLowerCase();
     if (e.ctrlKey && key === 'l') {
       e.preventDefault();
@@ -228,7 +236,8 @@ export default function Terminal({ session, speed, onUpdate, onQuit, onFlash, on
       } else {
         const o = new Out();
         if (session.cancelPending(o)) {
-          onCommand?.(CANCEL_MARK);
+          onCommand?.(CANCEL_MARK, bsCount.current);
+          bsCount.current = 0;
           append(o.lines, false);
         }
       }

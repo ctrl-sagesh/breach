@@ -85,6 +85,10 @@ Do not trust my memory of dates. Trust the files.`,
     },
   ],
   flag: 'BREACH{svc_backup}',
+  // The player builds the flag themselves from a discovered fragment (the username in the log line) wrapped
+  // in the stated template; the complete flag string never appears anywhere for a per-run swap to find.
+  // See src/lib/variation.ts.
+  varyFlag: false,
   hints: [
     'The first break-in is the earliest successful login from outside. Failed attempts are noise, not entry.',
     'Logs rotate into numbered files. Read /var/log/README before you assume the current auth.log is the whole story.',

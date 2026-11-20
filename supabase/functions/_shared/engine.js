@@ -1956,12 +1956,19 @@ function validateRun(run, missions) {
   }
   if (prev < run.commands.length * RUN_LIMITS.minAverageMs) return fail("impossible timing: the run is too fast overall");
   let clock = 0;
+  let errorCommands = 0;
   const session = new GameSession(mission9, { tier: run.tier, now: () => clock });
   for (const c of run.commands) {
     if (session.finished) return fail("commands after the attempt ended");
     clock = c.t;
-    if (c.cmd === CANCEL_MARK) session.cancelPending(new Out());
-    else session.input(c.cmd);
+    let out;
+    if (c.cmd === CANCEL_MARK) {
+      out = new Out();
+      session.cancelPending(out);
+    } else {
+      out = session.input(c.cmd);
+    }
+    if (out.lines.some((l) => l.kind === "err")) errorCommands++;
   }
   if (session.status === "failed") return fail(session.failReason === "time" ? "the clock ran out" : "trace reached 100%");
   if (session.status !== "won") return fail("incomplete run: the flag was never accepted");
@@ -1977,8 +1984,46 @@ function validateRun(run, missions) {
     hints: session.hintsUsed,
     endingId: session.endingId,
     usedAliases: session.usedAliases,
-    usedPipe: session.usedPipe
+    usedPipe: session.usedPipe,
+    errorCommands
   };
+}
+var TOKEN_TOLERANCE_MS = 5e3;
+function checkToken(token, claim, lastCommandMs, nowMs) {
+  if (token.usedAt !== null) return { ok: false, reason: "that run token has already been used" };
+  if (nowMs > token.expiresAt) return { ok: false, reason: "that run token has expired" };
+  if (token.playerId !== claim.playerId) return { ok: false, reason: "that run token belongs to a different player" };
+  if (token.missionId !== claim.missionId || token.tier !== claim.tier) return { ok: false, reason: "that run token was issued for a different mission" };
+  if (token.scope !== claim.scope || (token.date ?? void 0) !== claim.date) return { ok: false, reason: "that run token was issued for a different attempt" };
+  const serverElapsed = nowMs - token.startedAt;
+  if (serverElapsed < lastCommandMs - TOKEN_TOLERANCE_MS) return { ok: false, reason: "impossible timing: the server saw less time pass than the run claims" };
+  return { ok: true };
+}
+var SUSPICION_HIDE_THRESHOLD = 70;
+var SUSPICION_MIN_COMMANDS = 8;
+function suspicionFor(run, result) {
+  const reasons = [];
+  let score = 0;
+  const commands = run.commands;
+  if (commands.length >= SUSPICION_MIN_COMMANDS) {
+    const gaps = [];
+    for (let i = 1; i < commands.length; i++) gaps.push(commands[i].t - commands[i - 1].t);
+    const mean = gaps.reduce((a, b) => a + b, 0) / gaps.length;
+    const variance = gaps.reduce((a, b) => a + (b - mean) ** 2, 0) / gaps.length;
+    if (mean > 0 && Math.sqrt(variance) / mean < 0.15) {
+      score += 40;
+      reasons.push("unusually regular timing between commands");
+    }
+    if (commands.every((c) => (c.bs ?? 0) === 0)) {
+      score += 25;
+      reasons.push("no corrections typed in the whole run");
+    }
+    if (result.errorCommands === 0) {
+      score += 15;
+      reasons.push("no mistyped or rejected commands in the whole run");
+    }
+  }
+  return { score: Math.min(100, score), reasons };
 }
 
 // src/missions/shared.ts
@@ -2369,6 +2414,9 @@ The vault note is the thing I want. It is in the service account's home.`
     }
   ],
   flag: FLAG,
+  // The flag is only ever stored rot13-transformed (VAULT_NOTE above), so a per-run flag swap would desync
+  // from what the player actually decodes. See src/lib/variation.ts.
+  varyFlag: false,
   hints: [
     "The app config has a database password, but it is wrapped. Read the config first and look at the field name.",
     "password_b64 says what kind of wrapping it is. decode it with the right encoding, then login svc with the result.",
@@ -2493,6 +2541,10 @@ Do not trust my memory of dates. Trust the files.`
     }
   ],
   flag: "BREACH{svc_backup}",
+  // The player builds the flag themselves from a discovered fragment (the username in the log line) wrapped
+  // in the stated template; the complete flag string never appears anywhere for a per-run swap to find.
+  // See src/lib/variation.ts.
+  varyFlag: false,
   hints: [
     "The first break-in is the earliest successful login from outside. Failed attempts are noise, not entry.",
     "Logs rotate into numbered files. Read /var/log/README before you assume the current auth.log is the whole story.",
@@ -3362,6 +3414,46 @@ guest:${hex(rand, 32)}:user` };
   };
 }
 
+// src/lib/variation.ts
+var FLAG_SUFFIXES = [
+  "k7",
+  "q2",
+  "r9",
+  "z4",
+  "m1",
+  "x8",
+  "t3",
+  "v6",
+  "n5",
+  "w0",
+  "p2",
+  "j9",
+  "h6",
+  "c1",
+  "f8",
+  "y3"
+];
+function pick2(rand, items) {
+  return items[Math.floor(rand() * items.length)];
+}
+function substituteDeep(value, from, to) {
+  if (typeof value === "string") return value.split(from).join(to);
+  if (Array.isArray(value)) return value.map((v) => substituteDeep(v, from, to));
+  if (value !== null && typeof value === "object") {
+    const out = {};
+    for (const [k, v] of Object.entries(value)) out[k] = substituteDeep(v, from, to);
+    return out;
+  }
+  return value;
+}
+function applyFlagVariation(mission9, seed) {
+  if (mission9.varyFlag === false) return mission9;
+  const rand = seededRandom(seed);
+  const suffix = pick2(rand, FLAG_SUFFIXES);
+  const variedFlag = mission9.flag.replace(/\}$/, `_${suffix}}`);
+  return substituteDeep(mission9, mission9.flag, variedFlag);
+}
+
 // src/lib/nickname.ts
 var NICK_PATTERN = /^[A-Za-z0-9_-]{3,16}$/;
 var BLOCKED = ["fuck", "shit", "bitch", "cunt", "nigger", "nigga", "faggot", "retard", "kike", "rapist", "nazi", "porn"];
@@ -3454,9 +3546,9 @@ var KEY_WORDS = [
 ];
 var KEY_PATTERN = /^[A-Z]+-[A-Z]+-[A-Z]+-[A-Z]+-\d{4}$/;
 function generateRecoveryKey(random) {
-  const pick2 = () => KEY_WORDS[Math.floor(random() * KEY_WORDS.length)];
+  const pick3 = () => KEY_WORDS[Math.floor(random() * KEY_WORDS.length)];
   const digits = String(Math.floor(random() * 1e4)).padStart(4, "0");
-  return [pick2(), pick2(), pick2(), pick2(), digits].join("-");
+  return [pick3(), pick3(), pick3(), pick3(), digits].join("-");
 }
 function normalizeRecoveryKey(input) {
   return input.trim().toUpperCase().replace(/[\s_]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
@@ -3561,7 +3653,11 @@ export {
   MISSIONS,
   RESTORE_LIMIT,
   RUN_LIMITS,
+  SUSPICION_HIDE_THRESHOLD,
+  TOKEN_TOLERANCE_MS,
   admit,
+  applyFlagVariation,
+  checkToken,
   corsHeaders,
   dailyMission,
   generateRecoveryKey,
@@ -3571,6 +3667,7 @@ export {
   normalizeRecoveryKey,
   parseAllowedOrigins,
   shiftDate,
+  suspicionFor,
   utcDate,
   validateRun
 };

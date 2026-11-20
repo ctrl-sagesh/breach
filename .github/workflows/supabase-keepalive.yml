@@ -1,8 +1,11 @@
 name: Supabase keepalive ping
 
 # Supabase's free tier pauses a project after a week with no activity. This makes one lightweight, read-only
-# request to the leaderboard every few days so BREACH's project never pauses. It uses the publishable key only
-# (the same one the browser ships with) — never the service-role secret, which this workflow never sees.
+# request to the leaderboard, plus a write-and-delete health check against each Edge Function, every few days
+# so BREACH's project never pauses and a broken deploy gets caught early. Everything here uses the publishable
+# key only (the same one the browser ships with) — never the service-role secret, which this workflow never
+# sees. The health actions write only to health_check (see supabase/migrations/20261120000000_run_tokens.sql),
+# never to the leaderboard, and both functions are deployed --no-verify-jwt so the publishable key is enough.
 #
 # Cron has no "every N days" unit, so this uses day-of-month step syntax (runs on the 1st, 4th, 7th, ... of each
 # month) rather than an exact rolling 3-day cadence. Close enough for keeping a free-tier project awake.
@@ -29,3 +32,35 @@ jobs:
           echo "Supabase answered HTTP $code"
           cat /tmp/resp.txt
           [ "$code" -lt 400 ]
+
+      - name: Health check submit-run (insert and delete in health_check)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
+        run: |
+          if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_PUBLISHABLE_KEY" ]; then
+            echo "SUPABASE_URL or SUPABASE_PUBLISHABLE_KEY secret is not set; skipping." >&2
+            exit 0
+          fi
+          code=$(curl -s -o /tmp/resp.txt -w "%{http_code}" -X POST "$SUPABASE_URL/functions/v1/submit-run" \
+            -H "apikey: $SUPABASE_PUBLISHABLE_KEY" -H "content-type: application/json" \
+            --data '{"action":"health"}')
+          echo "submit-run health answered HTTP $code"
+          cat /tmp/resp.txt
+          [ "$code" -lt 400 ] && grep -q '"ok":true' /tmp/resp.txt
+
+      - name: Health check account (insert and delete in health_check)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
+        run: |
+          if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_PUBLISHABLE_KEY" ]; then
+            echo "SUPABASE_URL or SUPABASE_PUBLISHABLE_KEY secret is not set; skipping." >&2
+            exit 0
+          fi
+          code=$(curl -s -o /tmp/resp.txt -w "%{http_code}" -X POST "$SUPABASE_URL/functions/v1/account" \
+            -H "apikey: $SUPABASE_PUBLISHABLE_KEY" -H "content-type: application/json" \
+            --data '{"action":"health"}')
+          echo "account health answered HTTP $code"
+          cat /tmp/resp.txt
+          [ "$code" -lt 400 ] && grep -q '"ok":true' /tmp/resp.txt
