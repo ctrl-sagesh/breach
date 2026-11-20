@@ -3,7 +3,7 @@
 // clear job 1 on Easy and then start job 2 on Hard before clearing job 1 there too.
 
 import { describe, expect, it } from 'vitest';
-import { missionUnlocked, unlockedTiers } from '../src/lib/progress';
+import { missionUnlocked, tierWithProgress, unlockedTiers } from '../src/lib/progress';
 import { DEFAULT_SAVE, type SaveData } from '../src/lib/save';
 import { MISSIONS } from '../src/missions';
 
@@ -36,5 +36,30 @@ describe('unlockedTiers', () => {
 
   it('every tier is unlocked for job 1', () => {
     expect(unlockedTiers(saveWith({}), 0)).toEqual({ easy: true, medium: true, hard: true });
+  });
+});
+
+describe('tierWithProgress', () => {
+  it('is null when nothing is completed on any tier', () => {
+    expect(tierWithProgress(saveWith({}))).toBeNull();
+  });
+
+  it('finds progress on a tier other than the save\'s current selection', () => {
+    // DEFAULT_SAVE.tier is 'medium', but a restore can land all the completed missions on a different
+    // tier than whatever the (possibly fresh) device's own default happens to be.
+    const save = saveWith({ easy: { [MISSIONS[0].id]: { score: 10, points: 10, tier: 'easy', seconds: 1, trace: 0, hints: 0 } } });
+    expect(save.tier).toBe('medium');
+    expect(tierWithProgress(save)).toBe('easy');
+  });
+
+  it('picks whichever tier has the most completed missions when more than one has progress', () => {
+    const save = saveWith({
+      easy: { [MISSIONS[0].id]: { score: 10, points: 10, tier: 'easy', seconds: 1, trace: 0, hints: 0 } },
+      hard: {
+        [MISSIONS[0].id]: { score: 10, points: 10, tier: 'hard', seconds: 1, trace: 0, hints: 0 },
+        [MISSIONS[1].id]: { score: 10, points: 10, tier: 'hard', seconds: 1, trace: 0, hints: 0 },
+      },
+    });
+    expect(tierWithProgress(save)).toBe('hard');
   });
 });

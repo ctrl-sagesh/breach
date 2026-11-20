@@ -22,7 +22,7 @@ import { applyFlagVariation } from '../lib/variation';
 import { debounce, syncSave, type RestoreResult } from '../lib/cloud';
 import { addAttempt, type AttemptRecord, type Outcome } from '../lib/history';
 import { mergeSaves } from '../lib/merge';
-import { missionUnlocked, summarize, unlockedTiers } from '../lib/progress';
+import { missionUnlocked, summarize, tierWithProgress, unlockedTiers } from '../lib/progress';
 import type { DailyStats, ShareFacts } from '../lib/share';
 import Achievements, { AchievementToast } from './Achievements';
 import Boot from './Boot';
@@ -105,6 +105,8 @@ export default function GameApp() {
   const [screen, setScreen] = useState<Screen>({ name: 'boot' });
   const [session, setSession] = useState<GameSession | null>(null);
   const [attemptKey, setAttemptKey] = useState(0);
+  /** The board is configured, but this attempt's run token couldn't be fetched at start. See openSession. */
+  const [boardUnreachable, setBoardUnreachable] = useState(false);
   const [wipeKey, setWipeKey] = useState(0);
   const [closing, setClosing] = useState(false);
   const [systemReduce, setSystemReduce] = useState(false);
@@ -249,8 +251,11 @@ export default function GameApp() {
     setSave((prev) => {
       const base: SaveData = { ...prev, playerId: r.playerId, nickname: r.nickname, syncToken: r.syncToken, recoveryKey: undefined, registerSkipped: false };
       const merged = r.save ? mergeSaves(base, r.save) : base;
-      persistSave(merged);
-      return merged;
+      // mergeSaves keeps this device's own tier selection; a fresh device's default shouldn't shadow progress
+      // the restored save actually has elsewhere, or the menu says "start first job" on a cleared campaign.
+      const next = { ...merged, tier: tierWithProgress(merged) ?? merged.tier };
+      persistSave(next);
+      return next;
     });
   };
 
@@ -280,6 +285,7 @@ export default function GameApp() {
     };
     run.current = thisRun;
     setSession(null);
+    setBoardUnreachable(false);
     setAttemptKey((k) => k + 1);
     void (async () => {
       let finalMission = mission;
@@ -290,6 +296,8 @@ export default function GameApp() {
         if (started) {
           thisRun.token = started.token;
           finalMission = applyFlagVariation(mission, started.seed);
+        } else {
+          setBoardUnreachable(true);
         }
       }
       if (run.current !== thisRun) return;
@@ -656,6 +664,7 @@ export default function GameApp() {
             onAbort={abortMission}
             onCommand={onCommand}
             onFailed={(s) => onFailed(index, s, date)}
+            boardUnreachable={boardUnreachable}
           />
         </div>
       );

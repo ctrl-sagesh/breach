@@ -1,0 +1,14 @@
+-- Fixes a live bug: run_tokens.player_id had a foreign key to players(id), but the 'start' action (which
+-- inserts a run_tokens row) runs before a brand-new player's row exists in players — that row is only
+-- created later, during 'submit' (see supabase/functions/submit-run/index.ts). Every first-time player's
+-- very first mission start failed with a 23503 foreign key violation:
+--   insert or update on table "run_tokens" violates foreign key constraint "run_tokens_player_id_fkey"
+-- Confirmed from the submit-run function logs; not a grants problem (service_role's insert privilege was
+-- fine — it reached the constraint check and failed there, and health_check, granted the same way in the
+-- same migration, works).
+--
+-- The FK added no real safety: checkToken (src/engine/replay.ts) already verifies a token's player_id
+-- matches the submitting player at submit time, and run_tokens rows are short-lived (single use, 3-hour
+-- expiry) with no lasting data that benefits from an on-delete cascade the way runs/rate_limits/auth_attempts
+-- do. Dropping it is correct, not just expedient.
+alter table public.run_tokens drop constraint if exists run_tokens_player_id_fkey;

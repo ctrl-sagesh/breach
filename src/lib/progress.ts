@@ -69,3 +69,15 @@ export function buildShareCard(summary: CampaignSummary, endingLabel: string | n
 export function clearedOnAnyTier(save: SaveData): number {
   return MISSIONS.filter((m) => TIERS.some((t) => Boolean(save.completed[t][m.id]))).length;
 }
+
+/**
+ * Which difficulty actually has progress, or null if none does. `save.tier` is just the device's current
+ * selection, and a fresh device (or one freshly restored onto from a recovery key) defaults it independently
+ * of what was actually completed elsewhere — see mergeSaves, which keeps the merge's completed/attempts data
+ * but leaves `tier` as whatever the local side already had. Callers that adopt someone else's progress
+ * (restore, and nothing else today) should set `tier` from this, so the menu reflects real progress.
+ */
+export function tierWithProgress(save: SaveData): Tier | null {
+  const best = TIERS.map((t) => ({ t, completed: summarize(save, t).completed })).reduce((a, b) => (b.completed > a.completed ? b : a));
+  return best.completed > 0 ? best.t : null;
+}

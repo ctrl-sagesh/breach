@@ -22,6 +22,8 @@ interface MissionScreenProps {
   onCommand?: (raw: string, bs: number) => void;
   /** Called once when the attempt fails, by trace or by the clock. */
   onFailed?: (session: GameSession) => void;
+  /** Set when the board is configured but this attempt's run token couldn't be fetched at start. */
+  boardUnreachable?: boolean;
 }
 
 type Phase = 'playing' | 'tearing' | 'traced';
@@ -30,7 +32,7 @@ type Flash = { kind: 'granted' | 'denied'; id: number } | null;
 const ALARM_TRACE = 75;
 const COUNTDOWN_WARN = 120;
 
-export default function MissionScreen({ mission, session, attemptKey, speed, reduceMotion, onWon, onRetry, onAbort, onCommand, onFailed }: MissionScreenProps) {
+export default function MissionScreen({ mission, session, attemptKey, speed, reduceMotion, onWon, onRetry, onAbort, onCommand, onFailed, boardUnreachable }: MissionScreenProps) {
   const [, setTick] = useState(0);
   const [phase, setPhase] = useState<Phase>('playing');
   const [flash, setFlash] = useState<Flash>(null);
@@ -121,6 +123,11 @@ export default function MissionScreen({ mission, session, attemptKey, speed, red
         <div className="px-3 py-2">
           <TraceMeter value={trace} />
           {mission.objective ? <p className="mt-1 text-xs text-[var(--dim)]">{mission.objective}</p> : null}
+          {boardUnreachable ? (
+            <p className="mt-1 text-xs text-[var(--warn)]" role="status">
+              Couldn&apos;t reach the board for this run. Your score will still save locally.
+            </p>
+          ) : null}
         </div>
 
         {phase !== 'traced' ? (

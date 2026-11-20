@@ -119,7 +119,7 @@ export async function startRun(input: { playerId: string; missionId: string; tie
 /** Sends a finished run for checking. Returns what the server decided. */
 export async function submitRun(sub: Submission): Promise<SubmitResult> {
   if (!leaderboardConfigured()) return { status: 'offline', reason: 'The global board is not set up on this build.' };
-  if (!sub.run.token) return { status: 'offline', reason: 'This run has no verification token, so it can only be saved on this device.' };
+  if (!sub.run.token) return { status: 'offline', reason: "Couldn't reach the board when this run started, so it only saved locally." };
   try {
     const res = await withTimeout(`${SUPABASE_URL}/functions/v1/submit-run`, {
       method: 'POST',
