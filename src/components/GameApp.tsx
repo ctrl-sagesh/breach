@@ -17,7 +17,7 @@ import { campaignDone, factsFromWin, newlyUnlocked, type AchievementDef } from '
 import { dailyMission, dailyNumber, isHardFriday, streakFor, utcDate } from '../lib/daily';
 import { realWorldFor } from '../lib/realworld';
 import { trackDailyPlayed, trackMissionCleared, trackMissionStarted, trackMissionTraced, trackRestoreUsed } from '../lib/analytics';
-import { buildSubmission, getPlayerId, leaderboardConfigured, startRun, type Submission } from '../lib/leaderboard';
+import { buildSubmission, getPlayerId, leaderboardConfigured, setPlayerId, startRun, type StartedRun, type Submission } from '../lib/leaderboard';
 import { applyFlagVariation } from '../lib/variation';
 import { debounce, syncSave, type RestoreResult } from '../lib/cloud';
 import { addAttempt, type AttemptRecord, type Outcome } from '../lib/history';
@@ -85,6 +85,12 @@ function missionFor(index: number, date?: string): MissionDef {
   return date ? dailyMission(date) : MISSIONS[index];
 }
 
+/** Keys the run-token prefetch cache. Must match exactly what openSession asks startRun for, or the cached
+ * (possibly still in-flight) token for the warmed-up mission/tier/scope just goes unused. */
+function tokenCacheKey(missionId: string, tier: Tier, scope: 'campaign' | 'daily', date?: string): string {
+  return `${scope}|${missionId}|${tier}|${date ?? ''}`;
+}
+
 function newAttemptId(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
@@ -124,6 +130,13 @@ export default function GameApp() {
   });
   /** Set when a save change came from a sync merge, so the change does not send another sync. */
   const fromSync = useRef(false);
+  /**
+   * Run tokens requested early (while the briefing or daily screen is open), keyed by tokenCacheKey, so a
+   * cold-started submit-run has time to finish in the background before the player actually starts the
+   * mission. openSession consumes (and removes) the entry for the mission it opens; a miss just falls back
+   * to a fresh request there.
+   */
+  const tokenCache = useRef<Map<string, Promise<StartedRun | null>>>(new Map());
 
   // Storage and matchMedia are read on the client only, so the static export pre-renders safely.
   useEffect(() => {
@@ -189,6 +202,30 @@ export default function GameApp() {
     setAmbienceActive(screen.name === 'play');
   }, [screen.name]);
 
+  /** Warms the run-token cache. A no-op if that mission/tier/scope is already cached (in flight or settled). */
+  const prefetchToken = useCallback((missionId: string, tier: Tier, scope: 'campaign' | 'daily', date?: string) => {
+    if (!leaderboardConfigured()) return;
+    const key = tokenCacheKey(missionId, tier, scope, date);
+    if (tokenCache.current.has(key)) return;
+    tokenCache.current.set(key, startRun({ playerId: getPlayerId(), missionId, tier, scope, date }));
+  }, []);
+
+  // Warm up a token as soon as the briefing opens, well before Accept, so a cold-started submit-run has time
+  // to finish in the background. Re-warms if the tier picker changes while the briefing is still open.
+  const briefingIndex = screen.name === 'briefing' ? screen.index : null;
+  useEffect(() => {
+    if (briefingIndex === null) return;
+    prefetchToken(MISSIONS[briefingIndex].id, save.tier, 'campaign');
+  }, [briefingIndex, save.tier, prefetchToken]);
+
+  // Same idea for the daily menu, keyed by today's date.
+  const onDailyScreen = screen.name === 'daily';
+  useEffect(() => {
+    if (!onDailyScreen) return;
+    const date = utcDate();
+    prefetchToken(dailyMission(date).id, save.tier, 'daily', date);
+  }, [onDailyScreen, save.tier, prefetchToken]);
+
   const reduceMotion = effectiveReduceMotion(save.motion, systemReduce);
 
   const update = useCallback((patch: Partial<SaveData>) => {
@@ -248,6 +285,12 @@ export default function GameApp() {
   const adoptRestored = (r: RestoreResult) => {
     trackRestoreUsed();
     fromSync.current = false;
+    // getPlayerId() otherwise keeps returning the fresh id this device generated for itself before the
+    // restore, which belongs to no account: submitting under it would try to create a new player row with
+    // the restored nickname, which is already taken by the real account. Adopt the server's id instead, and
+    // drop any token already warming up under the old one.
+    setPlayerId(r.playerId);
+    tokenCache.current.clear();
     setSave((prev) => {
       const base: SaveData = { ...prev, playerId: r.playerId, nickname: r.nickname, syncToken: r.syncToken, recoveryKey: undefined, registerSkipped: false };
       const merged = r.save ? mergeSaves(base, r.save) : base;
@@ -272,13 +315,25 @@ export default function GameApp() {
   /**
    * Opens a new attempt. When the leaderboard is reachable, this first asks the server for a run token (which
    * carries the seed that varies the flag for this attempt) before building the session, so the player and the
-   * server are always looking at the same mission. A run started without a token (offline, or the request timed
-   * out) still plays normally on the unvaried mission; it just can't be posted later (see submitRun).
+   * server are always looking at the same mission. It reuses whatever prefetchToken already warmed up for this
+   * mission/tier/scope (see the briefing/daily effects above) and only falls back to a fresh request here.
+   *
+   * The attempt's clock (startedAt, so every command's `t` is measured from it) is only set once the token
+   * settles — not when this is called. A token request started earlier (the common, prefetched case) already
+   * finished by then, so this is instant and startedAt lands at essentially the same moment as normal. But if
+   * it wasn't prefetched and this has to wait on a slow or cold-started request, starting the clock here
+   * instead of at the top would make the server's token.started_at (set when it actually processed the
+   * request, before the slow round trip even finished) look like it came *after* the clock already started —
+   * eating into the server-elapsed tolerance in checkToken for no reason the player caused. Waiting keeps
+   * token.started_at always at or before the clock's zero point, by construction.
+   *
+   * A run started without a token (offline, or both tries timed out) still plays normally on the unvaried
+   * mission; it just can't be posted later (see submitRun).
    */
   const openSession = (mission: MissionDef, sessionTier: Tier, opts?: { quickBriefing?: boolean; scope?: 'campaign' | 'daily'; date?: string }) => {
     const scope = opts?.scope ?? 'campaign';
     const thisRun: { startedAt: number; commands: RunCommand[]; recorded: boolean; token: string | null } = {
-      startedAt: Date.now(),
+      startedAt: 0,
       commands: [],
       recorded: false,
       token: null,
@@ -290,7 +345,10 @@ export default function GameApp() {
     void (async () => {
       let finalMission = mission;
       if (leaderboardConfigured()) {
-        const started = await startRun({ playerId: getPlayerId(), missionId: mission.id, tier: sessionTier, scope, date: opts?.date });
+        const key = tokenCacheKey(mission.id, sessionTier, scope, opts?.date);
+        const cached = tokenCache.current.get(key);
+        tokenCache.current.delete(key);
+        const started = await (cached ?? startRun({ playerId: getPlayerId(), missionId: mission.id, tier: sessionTier, scope, date: opts?.date }));
         // A newer attempt may have started while this was in flight; don't resurrect a stale one.
         if (run.current !== thisRun) return;
         if (started) {
@@ -301,6 +359,7 @@ export default function GameApp() {
         }
       }
       if (run.current !== thisRun) return;
+      thisRun.startedAt = Date.now();
       setSession(new GameSession(finalMission, { tier: sessionTier, quickBriefing: opts?.quickBriefing }));
     })();
   };

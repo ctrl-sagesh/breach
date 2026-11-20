@@ -9,8 +9,12 @@ import type { RunCommand, RunLog } from '../engine/replay';
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL ?? '';
 const PUBLISHABLE_KEY = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ?? '';
 const TIMEOUT_MS = 8000;
-/** Starting a run happens before the player can do anything, so it fails closed to "offline" quickly. */
-const START_TIMEOUT_MS = 3000;
+/**
+ * A cold-started Edge Function can take noticeably longer than its ~1.3s warm response; this needs to be
+ * generous because the whole point is to call it early (while the player is still on the briefing or daily
+ * screen, before the mission starts) and let it finish in the background. startRun also retries once.
+ */
+const START_TIMEOUT_MS = 10_000;
 const PLAYER_KEY = 'breach.player';
 
 export function leaderboardConfigured(): boolean {
@@ -28,6 +32,20 @@ export function getPlayerId(): string {
   } catch {
     // Storage is blocked. The id lasts for this page visit only.
     return newUuid();
+  }
+}
+
+/**
+ * Overwrites the local player id. Used only after a recovery-key restore adopts the server's real id for
+ * that account — the id getPlayerId() would otherwise keep returning is a fresh one this device generated
+ * for itself before the restore, which belongs to no account and would collide on nickname at submit time.
+ * Every later getPlayerId() call (run tokens, submissions) uses this id from then on.
+ */
+export function setPlayerId(id: string): void {
+  try {
+    window.localStorage.setItem(PLAYER_KEY, id);
+  } catch {
+    // Storage is blocked; getPlayerId() already falls back to a page-visit-only id in that case.
   }
 }
 
@@ -95,13 +113,7 @@ export interface StartedRun {
   seed: number;
 }
 
-/**
- * Asks the server for a run token before an attempt begins. The token pins a server-side start time and a
- * per-run seed (for flag variation). Returns null on any failure, timeout, or when the board isn't configured —
- * never throws. A run started without a token still plays normally; it just can't be posted (see submitRun).
- */
-export async function startRun(input: { playerId: string; missionId: string; tier: Tier; scope: 'campaign' | 'daily'; date?: string }): Promise<StartedRun | null> {
-  if (!leaderboardConfigured()) return null;
+async function startRunOnce(input: { playerId: string; missionId: string; tier: Tier; scope: 'campaign' | 'daily'; date?: string }): Promise<StartedRun | null> {
   try {
     const res = await withTimeout(
       `${SUPABASE_URL}/functions/v1/submit-run`,
@@ -114,6 +126,19 @@ export async function startRun(input: { playerId: string; missionId: string; tie
   } catch {
     return null;
   }
+}
+
+/**
+ * Asks the server for a run token before an attempt begins. The token pins a server-side start time and a
+ * per-run seed (for flag variation). Retries once on any failure (a timeout, including a cold-started
+ * function, or a network error) before giving up. Returns null only once both tries fail, or when the board
+ * isn't configured — never throws. A run started without a token still plays normally; it just can't be
+ * posted (see submitRun). Callers should start this as early as possible (when the briefing or daily screen
+ * opens, not when the mission actually starts) so a cold start has time to finish in the background.
+ */
+export async function startRun(input: { playerId: string; missionId: string; tier: Tier; scope: 'campaign' | 'daily'; date?: string }): Promise<StartedRun | null> {
+  if (!leaderboardConfigured()) return null;
+  return (await startRunOnce(input)) ?? (await startRunOnce(input));
 }
 
 /** Sends a finished run for checking. Returns what the server decided. */
